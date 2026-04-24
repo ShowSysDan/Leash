@@ -27,6 +27,7 @@ Endpoints
   POST /api/v1/route/bulk           Route multiple receivers at once
 """
 import asyncio
+import hmac
 import logging
 from datetime import datetime
 from functools import wraps
@@ -50,8 +51,9 @@ def _check_api_key():
     key = current_app.config.get("API_KEY")
     if not key:
         return None  # auth disabled
-    provided = request.headers.get("X-API-Key") or request.args.get("api_key")
-    if provided != key:
+    provided = request.headers.get("X-API-Key") or request.args.get("api_key") or ""
+    # Constant-time compare to prevent timing attacks on the key.
+    if not hmac.compare_digest(provided, key):
         return jsonify({"error": "Unauthorized"}), 401
     return None
 

@@ -17,7 +17,7 @@ from flask import Blueprint, current_app, jsonify, request
 
 from app import db
 from app.models import NDIReceiver, Snapshot, SnapshotEntry
-from app.routes._helpers import err as _err
+from app.routes._helpers import err as _err, valid_name, MAX_DESCRIPTION
 from app.services.audit_log import device_error, snapshot_recalled, snapshot_source_changed
 from app.services.birddog_client import client_from_receiver, run_async
 
@@ -33,20 +33,23 @@ def list_snapshots():
 @snapshots_api_bp.route("/snapshots", methods=["POST"])
 def create_snapshot():
     body = request.get_json(silent=True) or {}
-    name = (body.get("name") or "").strip()
-    if not name:
-        return _err("name is required")
+    ok, name = valid_name(body.get("name"))
+    if not ok:
+        return _err("name is required (max 100 characters)")
 
     # Determine which receivers to include
     ids = body.get("receiver_ids")
     if ids:
         receivers = NDIReceiver.query.filter(NDIReceiver.id.in_(ids)).all()
+        missing = set(ids) - {r.id for r in receivers}
+        if missing:
+            return _err(f"Unknown receiver ids: {sorted(missing)}")
     else:
         receivers = NDIReceiver.query.all()
 
     snap = Snapshot(
         name=name,
-        description=body.get("description", ""),
+        description=(body.get("description") or "").strip()[:MAX_DESCRIPTION],
     )
     db.session.add(snap)
     db.session.flush()  # get snap.id

@@ -60,26 +60,57 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
+      // Build the table with textContent so receiver labels, IPs, and
+      // source names (user- and device-supplied) are treated as data, not HTML.
       const entries = data.entries || [];
-      let html = `<p class="text-muted small">${entries.length} receivers captured.</p>
-        <table class="table table-sm table-dark">
-          <thead><tr><th>Receiver</th><th>IP</th><th>Saved Source</th><th>Current Status</th></tr></thead>
-          <tbody>`;
+      const previewBody = document.getElementById('preview-snap-body');
+      previewBody.textContent = '';
+
+      const summary = document.createElement('p');
+      summary.className = 'text-muted small';
+      summary.textContent = `${entries.length} receivers captured.`;
+      previewBody.appendChild(summary);
+
+      const table = document.createElement('table');
+      table.className = 'table table-sm table-dark';
+      table.innerHTML = '<thead><tr><th>Receiver</th><th>IP</th><th>Saved Source</th><th>Current Status</th></tr></thead>';
+      const tbody = document.createElement('tbody');
+
+      const STATUS_CLS = { online: 'bg-success', offline: 'bg-danger' };
+
       entries.forEach(e => {
-        const statusBadge = e.receiver_status === 'online'
-          ? '<span class="badge bg-success">online</span>'
-          : e.receiver_status === 'offline'
-          ? '<span class="badge bg-danger">offline</span>'
-          : '<span class="badge bg-secondary">unknown</span>';
-        html += `<tr>
-          <td>${e.receiver_label || '—'}</td>
-          <td class="text-muted">${e.receiver_ip || '—'}</td>
-          <td>${e.source_name || '<em class="text-muted">none</em>'}</td>
-          <td>${statusBadge}</td>
-        </tr>`;
+        const tr = document.createElement('tr');
+        const td = (cls, text) => {
+          const el = document.createElement('td');
+          if (cls) el.className = cls;
+          el.textContent = text;
+          return el;
+        };
+        tr.appendChild(td('', e.receiver_label || '—'));
+        tr.appendChild(td('text-muted', e.receiver_ip || '—'));
+
+        const srcTd = document.createElement('td');
+        if (e.source_name) {
+          srcTd.textContent = e.source_name;
+        } else {
+          const em = document.createElement('em');
+          em.className = 'text-muted';
+          em.textContent = 'none';
+          srcTd.appendChild(em);
+        }
+        tr.appendChild(srcTd);
+
+        const statusTd = document.createElement('td');
+        const badge = document.createElement('span');
+        badge.className = `badge ${STATUS_CLS[e.receiver_status] || 'bg-secondary'}`;
+        badge.textContent = e.receiver_status || 'unknown';
+        statusTd.appendChild(badge);
+        tr.appendChild(statusTd);
+
+        tbody.appendChild(tr);
       });
-      html += '</tbody></table>';
-      document.getElementById('preview-snap-body').innerHTML = html;
+      table.appendChild(tbody);
+      previewBody.appendChild(table);
     });
   });
 

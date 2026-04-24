@@ -29,31 +29,55 @@
 
   // ── helpers ────────────────────────────────────────────────────────────────
 
+  // Small DOM helpers for safe, terse construction.
+  function h(tag, attrs = {}, text) {
+    const el = document.createElement(tag);
+    for (const k in attrs) {
+      if (k === 'class')     el.className = attrs[k];
+      else if (k === 'html') el.innerHTML = attrs[k];      // caller-controlled (icons only)
+      else if (k.startsWith('data-')) el.setAttribute(k, attrs[k]);
+      else el[k] = attrs[k];
+    }
+    if (text !== undefined) el.textContent = String(text);
+    return el;
+  }
+
   function enforcementCell(s) {
-    if (!s.persistent) return '<span class="text-muted small">—</span>';
+    const td = document.createElement('td');
+    if (!s.persistent) {
+      td.appendChild(h('span', { class: 'text-muted small' }, '—'));
+      return td;
+    }
 
     if (s.is_enforcing && s.enforcing_until) {
       const until = new Date(s.enforcing_until + 'Z');
       const mins  = Math.max(0, Math.round((until - Date.now()) / 60000));
-      return `
-        <span class="badge bg-success enforcement-badge" data-enforcing-until="${s.enforcing_until}">
-          <i class="bi bi-shield-check me-1"></i>${mins} min left
-        </span>
-        <button class="btn btn-xs btn-outline-warning ms-1 btn-stop-enforcement"
-                data-sched-id="${s.id}" title="Stop enforcement now">
-          <i class="bi bi-stop-circle"></i>
-        </button>`;
+      const badge = h('span', {
+        class: 'badge bg-success enforcement-badge',
+        'data-enforcing-until': s.enforcing_until,
+        html: '<i class="bi bi-shield-check me-1"></i>',
+      });
+      badge.appendChild(document.createTextNode(`${mins} min left`));
+      td.appendChild(badge);
+
+      const stop = h('button', {
+        class: 'btn btn-xs btn-outline-warning ms-1 btn-stop-enforcement',
+        'data-sched-id': s.id,
+        title: 'Stop enforcement now',
+        html: '<i class="bi bi-stop-circle"></i>',
+      });
+      td.appendChild(stop);
+    } else {
+      const span = h('span', { class: 'text-muted small', html: '<i class="bi bi-shield me-1"></i>' });
+      span.appendChild(document.createTextNode(`${s.persist_minutes} min window`));
+      td.appendChild(span);
     }
-    return `<span class="text-muted small"><i class="bi bi-shield me-1"></i>${s.persist_minutes} min window</span>`;
+    return td;
   }
 
   function renderRow(s) {
     const row = document.getElementById(`sched-row-${s.id}`);
     if (!row) { location.reload(); return; }
-
-    const dayBadges = s.day_labels.map(d =>
-      `<span class="badge bg-secondary">${d}</span>`
-    ).join(' ');
 
     const lastRunStr = s.last_run
       ? new Date(s.last_run + 'Z').toLocaleString()
@@ -66,47 +90,89 @@
       else                                      resultClass = 'text-warning';
     }
 
-    const snapBadge = s.snapshot_name
-      ? `<span class="badge bg-dark border border-secondary">${s.snapshot_name}</span>`
-      : `<span class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>Deleted</span>`;
-
-    const enabledCls  = s.enabled ? 'btn-success' : 'btn-outline-secondary';
-    const enabledIcon = s.enabled ? 'check-circle-fill' : 'pause-circle';
-
     row.className = s.enabled ? '' : 'opacity-50';
-    row.innerHTML = `
-      <td><strong>${s.name}</strong></td>
-      <td>${snapBadge}</td>
-      <td><div class="d-flex gap-1 flex-wrap">${dayBadges}</div></td>
-      <td><span class="font-monospace">${s.time_of_day}</span></td>
-      <td class="text-center">
-        <button class="btn btn-xs ${enabledCls} btn-toggle-sched"
-                data-sched-id="${s.id}" title="${s.enabled ? 'Disable' : 'Enable'}">
-          <i class="bi bi-${enabledIcon}"></i>
-        </button>
-      </td>
-      <td>${enforcementCell(s)}</td>
-      <td>
-        <small class="text-muted d-block">${lastRunStr}</small>
-        <small class="${resultClass}">${s.last_result || ''}</small>
-      </td>
-      <td class="text-end">
-        <div class="d-flex gap-1 justify-content-end">
-          <button class="btn btn-xs btn-outline-secondary btn-edit-sched"
-                  data-sched-id="${s.id}"
-                  data-name="${s.name}"
-                  data-snapshot-id="${s.snapshot_id || ''}"
-                  data-days="${s.days_of_week}"
-                  data-time="${s.time_of_day}"
-                  data-enabled="${s.enabled}"
-                  data-persistent="${s.persistent}"
-                  data-persist-minutes="${s.persist_minutes}"
-                  title="Edit"><i class="bi bi-pencil"></i></button>
-          <button class="btn btn-xs btn-outline-danger btn-delete-sched"
-                  data-sched-id="${s.id}" data-sched-name="${s.name}"
-                  title="Delete"><i class="bi bi-trash"></i></button>
-        </div>
-      </td>`;
+    row.textContent = '';
+
+    // Name (user-supplied)
+    const nameTd = document.createElement('td');
+    nameTd.appendChild(h('strong', {}, s.name));
+    row.appendChild(nameTd);
+
+    // Snapshot (name user-supplied)
+    const snapTd = document.createElement('td');
+    if (s.snapshot_name) {
+      snapTd.appendChild(h('span', { class: 'badge bg-dark border border-secondary' }, s.snapshot_name));
+    } else {
+      snapTd.appendChild(h('span', {
+        class: 'text-danger small',
+        html: '<i class="bi bi-exclamation-triangle me-1"></i>Deleted',
+      }));
+    }
+    row.appendChild(snapTd);
+
+    // Days (server-generated labels, safe but stay consistent)
+    const daysTd = document.createElement('td');
+    const daysWrap = h('div', { class: 'd-flex gap-1 flex-wrap' });
+    s.day_labels.forEach(d => daysWrap.appendChild(h('span', { class: 'badge bg-secondary' }, d)));
+    daysTd.appendChild(daysWrap);
+    row.appendChild(daysTd);
+
+    // Time (validated HH:MM)
+    const timeTd = document.createElement('td');
+    timeTd.appendChild(h('span', { class: 'font-monospace' }, s.time_of_day));
+    row.appendChild(timeTd);
+
+    // On/off toggle
+    const toggleTd = h('td', { class: 'text-center' });
+    const toggleBtn = h('button', {
+      class: `btn btn-xs ${s.enabled ? 'btn-success' : 'btn-outline-secondary'} btn-toggle-sched`,
+      'data-sched-id': s.id,
+      title: s.enabled ? 'Disable' : 'Enable',
+      html: `<i class="bi bi-${s.enabled ? 'check-circle-fill' : 'pause-circle'}"></i>`,
+    });
+    toggleTd.appendChild(toggleBtn);
+    row.appendChild(toggleTd);
+
+    // Enforcement cell (already returns a <td>)
+    row.appendChild(enforcementCell(s));
+
+    // Last run / result (server-generated — last_result can contain exception text)
+    const lastTd = document.createElement('td');
+    lastTd.appendChild(h('small', { class: 'text-muted d-block' }, lastRunStr));
+    lastTd.appendChild(h('small', { class: resultClass }, s.last_result || ''));
+    row.appendChild(lastTd);
+
+    // Actions — dataset values use setAttribute which safely escapes
+    const actionsTd = h('td', { class: 'text-end' });
+    const actionsWrap = h('div', { class: 'd-flex gap-1 justify-content-end' });
+
+    const editBtn = h('button', {
+      class: 'btn btn-xs btn-outline-secondary btn-edit-sched',
+      title: 'Edit',
+      html: '<i class="bi bi-pencil"></i>',
+    });
+    editBtn.setAttribute('data-sched-id', s.id);
+    editBtn.setAttribute('data-name', s.name);
+    editBtn.setAttribute('data-snapshot-id', s.snapshot_id || '');
+    editBtn.setAttribute('data-days', s.days_of_week);
+    editBtn.setAttribute('data-time', s.time_of_day);
+    editBtn.setAttribute('data-enabled', s.enabled);
+    editBtn.setAttribute('data-persistent', s.persistent);
+    editBtn.setAttribute('data-persist-minutes', s.persist_minutes);
+    actionsWrap.appendChild(editBtn);
+
+    const delBtn = h('button', {
+      class: 'btn btn-xs btn-outline-danger btn-delete-sched',
+      title: 'Delete',
+      html: '<i class="bi bi-trash"></i>',
+    });
+    delBtn.setAttribute('data-sched-id', s.id);
+    delBtn.setAttribute('data-sched-name', s.name);
+    actionsWrap.appendChild(delBtn);
+
+    actionsTd.appendChild(actionsWrap);
+    row.appendChild(actionsTd);
+
     bindRowActions(row);
     updateCountdowns();
   }

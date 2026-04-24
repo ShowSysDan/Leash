@@ -40,7 +40,7 @@ from app.services.audit_log import (
     source_changed,
     sources_discovered,
 )
-from app.routes._helpers import err as _err
+from app.routes._helpers import err as _err, valid_octet, MAX_LABEL
 from app.services.birddog_client import (
     bulk_fetch_status,
     client_config,
@@ -104,27 +104,23 @@ def list_receivers():
 @api_bp.route("/receivers", methods=["POST"])
 def create_receiver():
     body = request.get_json(silent=True) or {}
-    if "ip_last_octet" not in body:
-        return _err("ip_last_octet is required")
-
-    octet = str(body["ip_last_octet"])
+    ok, octet = valid_octet(body.get("ip_last_octet"))
+    if not ok:
+        return _err("ip_last_octet must be an integer from 1 to 254")
     if NDIReceiver.query.filter_by(ip_last_octet=octet).first():
         return _err(f"Receiver with IP octet {octet} already exists", 409)
 
     # Use provided index, or last octet as integer, or next sequential
-    if "index" in body:
-        index = int(body["index"])
-    else:
-        index = int(octet) if octet.isdigit() else None
-    if index is None or NDIReceiver.query.filter_by(index=index).first():
+    index = int(body["index"]) if "index" in body else int(octet)
+    if NDIReceiver.query.filter_by(index=index).first():
         max_idx = db.session.query(db.func.max(NDIReceiver.index)).scalar() or 0
         index = max_idx + 1
 
-    receiver = NDIReceiver(
-        index=index,
-        ip_last_octet=octet,
-        label=body.get("label"),
-    )
+    label = (body.get("label") or None)
+    if label is not None:
+        label = str(label).strip()[:MAX_LABEL] or None
+
+    receiver = NDIReceiver(index=index, ip_last_octet=octet, label=label)
     db.session.add(receiver)
     db.session.commit()
     return jsonify(receiver.to_dict()), 201
@@ -142,9 +138,13 @@ def update_receiver(receiver_id: int):
     body = request.get_json(silent=True) or {}
 
     if "label" in body:
-        receiver.label = body["label"]
+        raw = body["label"]
+        receiver.label = (str(raw).strip()[:MAX_LABEL] or None) if raw else None
     if "ip_last_octet" in body:
-        receiver.ip_last_octet = str(body["ip_last_octet"])
+        ok, octet = valid_octet(body["ip_last_octet"])
+        if not ok:
+            return _err("ip_last_octet must be an integer from 1 to 254")
+        receiver.ip_last_octet = octet
 
     receiver.updated_at = datetime.utcnow()
     db.session.commit()

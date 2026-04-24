@@ -4,10 +4,12 @@
 window.Leash = (() => {
 
   // ── Toast helper ────────────────────────────────────────────────────────
+  // Message content is inserted with textContent to prevent XSS from any
+  // server- or device-supplied string passed in (hostnames, source names,
+  // error messages etc).
   function toast(message, type = 'success') {
     const container = document.getElementById('toast-container');
     if (!container) return;
-    const id = `toast-${Date.now()}`;
     const colours = {
       success: 'bg-success',
       danger:  'bg-danger',
@@ -15,15 +17,25 @@ window.Leash = (() => {
       info:    'bg-info text-dark',
     };
     const bg = colours[type] || 'bg-secondary';
-    container.insertAdjacentHTML('beforeend', `
-      <div id="${id}" class="toast align-items-center text-white ${bg} border-0" role="alert">
-        <div class="d-flex">
-          <div class="toast-body">${message}</div>
-          <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
-        </div>
-      </div>
-    `);
-    const el = document.getElementById(id);
+
+    const el = document.createElement('div');
+    el.className = `toast align-items-center text-white ${bg} border-0`;
+    el.setAttribute('role', 'alert');
+
+    const wrap = document.createElement('div');
+    wrap.className = 'd-flex';
+    const body = document.createElement('div');
+    body.className = 'toast-body';
+    body.textContent = String(message);
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn-close btn-close-white me-2 m-auto';
+    btn.setAttribute('data-bs-dismiss', 'toast');
+    wrap.appendChild(body);
+    wrap.appendChild(btn);
+    el.appendChild(wrap);
+    container.appendChild(el);
+
     const t = new bootstrap.Toast(el, { delay: 4000 });
     t.show();
     el.addEventListener('hidden.bs.toast', () => el.remove());
@@ -146,6 +158,7 @@ window.Leash = (() => {
     const body  = document.getElementById('scan-result-body');
     const reloadBtn = document.getElementById('btn-scan-reload-page');
 
+    // Static loader markup — no interpolation, safe.
     body.innerHTML = '<div class="loader-overlay"><span class="spinner-border me-2"></span>Scanning 10.1.248.1–254… (this takes ~5 s)</div>';
     if (reloadBtn) reloadBtn.style.display = 'none';
     modal.show();
@@ -159,7 +172,11 @@ window.Leash = (() => {
       const data = await resp.json();
 
       if (!resp.ok) {
-        body.innerHTML = `<div class="text-danger">Scan failed: ${data.error || resp.status}</div>`;
+        body.textContent = '';
+        const div = document.createElement('div');
+        div.className = 'text-danger';
+        div.textContent = `Scan failed: ${data.error || resp.status}`;
+        body.appendChild(div);
         return;
       }
 
@@ -168,36 +185,77 @@ window.Leash = (() => {
       const found   = data.found ?? 0;
       const total   = data.scanned ?? 254;
 
-      let html = `
-        <div class="row text-center mb-3">
-          <div class="col"><div class="display-6 fw-bold text-info">${total}</div><small>Probed</small></div>
-          <div class="col"><div class="display-6 fw-bold text-success">${found}</div><small>Found</small></div>
-          <div class="col"><div class="display-6 fw-bold text-primary">${added}</div><small>New</small></div>
-          <div class="col"><div class="display-6 fw-bold text-warning">${updated}</div><small>Updated</small></div>
-        </div>
-      `;
+      body.textContent = '';
+
+      // Stats row — numbers are safe but keep consistent building style.
+      const stats = document.createElement('div');
+      stats.className = 'row text-center mb-3';
+      [
+        ['text-info', total, 'Probed'],
+        ['text-success', found, 'Found'],
+        ['text-primary', added, 'New'],
+        ['text-warning', updated, 'Updated'],
+      ].forEach(([cls, num, label]) => {
+        const col = document.createElement('div');
+        col.className = 'col';
+        const big = document.createElement('div');
+        big.className = `display-6 fw-bold ${cls}`;
+        big.textContent = num;
+        const small = document.createElement('small');
+        small.textContent = label;
+        col.appendChild(big);
+        col.appendChild(small);
+        stats.appendChild(col);
+      });
+      body.appendChild(stats);
 
       if (data.receivers && data.receivers.length) {
-        html += '<table class="table table-sm table-dark table-hover mb-0"><thead><tr><th>IP</th><th>Hostname</th><th>Firmware</th><th>Status</th></tr></thead><tbody>';
+        // Build device table with textContent for every device-supplied field —
+        // hostnames and firmware versions come from untrusted BirdDog /about.
+        const table = document.createElement('table');
+        table.className = 'table table-sm table-dark table-hover mb-0';
+        table.innerHTML = '<thead><tr><th>IP</th><th>Hostname</th><th>Firmware</th><th>Status</th></tr></thead>';
+        const tbody = document.createElement('tbody');
         data.receivers.forEach(r => {
-          const badge = r.status === 'online'
-            ? '<span class="badge bg-success">online</span>'
-            : '<span class="badge bg-danger">offline</span>';
-          html += `<tr><td>${r.ip_address}</td><td>${r.hostname || '—'}</td><td class="text-muted small">${r.firmware_version || '—'}</td><td>${badge}</td></tr>`;
+          const tr = document.createElement('tr');
+          const td = (cls, text) => {
+            const el = document.createElement('td');
+            if (cls) el.className = cls;
+            el.textContent = text;
+            return el;
+          };
+          tr.appendChild(td('', r.ip_address));
+          tr.appendChild(td('', r.hostname || '—'));
+          tr.appendChild(td('text-muted small', r.firmware_version || '—'));
+          const statusTd = document.createElement('td');
+          const badge = document.createElement('span');
+          badge.className = `badge ${r.status === 'online' ? 'bg-success' : 'bg-danger'}`;
+          badge.textContent = r.status;
+          statusTd.appendChild(badge);
+          tr.appendChild(statusTd);
+          tbody.appendChild(tr);
         });
-        html += '</tbody></table>';
+        table.appendChild(tbody);
+        body.appendChild(table);
+
         // Also update the dashboard grid without a page reload
         data.receivers.forEach(updateReceiverCard);
         updateSummary(data.receivers);
       } else {
-        html += '<p class="text-muted text-center">No BirdDog PLAY devices found.</p>';
+        const p = document.createElement('p');
+        p.className = 'text-muted text-center';
+        p.textContent = 'No BirdDog PLAY devices found.';
+        body.appendChild(p);
       }
 
-      body.innerHTML = html;
       if (reloadBtn && added > 0) reloadBtn.style.display = '';
 
     } catch (err) {
-      body.innerHTML = `<div class="text-danger">Error: ${err.message}</div>`;
+      body.textContent = '';
+      const div = document.createElement('div');
+      div.className = 'text-danger';
+      div.textContent = `Error: ${err.message}`;
+      body.appendChild(div);
     }
   }
 

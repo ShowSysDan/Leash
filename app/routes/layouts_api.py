@@ -16,9 +16,16 @@ from flask import Blueprint, jsonify, request
 
 from app import db
 from app.models import Layout, LayoutPosition
-from app.routes._helpers import err as _err
+from app.routes._helpers import (
+    err as _err,
+    valid_hex_color,
+    valid_name,
+    MAX_DESCRIPTION,
+)
 
 layouts_api_bp = Blueprint("layouts_api", __name__)
+
+_DEFAULT_BG = "#0a1628"
 
 
 @layouts_api_bp.route("/layouts", methods=["GET"])
@@ -30,14 +37,15 @@ def list_layouts():
 @layouts_api_bp.route("/layouts", methods=["POST"])
 def create_layout():
     body = request.get_json(silent=True) or {}
-    if not body.get("name"):
-        return _err("name is required")
+    ok, name = valid_name(body.get("name"))
+    if not ok:
+        return _err("name is required (max 100 characters)")
+    bg = body.get("bg_color", _DEFAULT_BG)
+    if not valid_hex_color(bg):
+        return _err("bg_color must be a hex colour (e.g. #0a1628 or #abc)")
+    desc = (body.get("description") or "").strip()[:MAX_DESCRIPTION]
 
-    layout = Layout(
-        name=body["name"],
-        description=body.get("description", ""),
-        bg_color=body.get("bg_color", "#0a1628"),
-    )
+    layout = Layout(name=name, description=desc, bg_color=bg)
     db.session.add(layout)
     db.session.commit()
     return jsonify(layout.to_dict(include_positions=True)), 201
@@ -53,9 +61,19 @@ def get_layout(layout_id: int):
 def update_layout(layout_id: int):
     layout = Layout.query.get_or_404(layout_id)
     body = request.get_json(silent=True) or {}
-    for field in ("name", "description", "bg_color"):
-        if field in body:
-            setattr(layout, field, body[field])
+
+    if "name" in body:
+        ok, name = valid_name(body["name"])
+        if not ok:
+            return _err("name is required (max 100 characters)")
+        layout.name = name
+    if "description" in body:
+        layout.description = (body["description"] or "").strip()[:MAX_DESCRIPTION]
+    if "bg_color" in body:
+        if not valid_hex_color(body["bg_color"]):
+            return _err("bg_color must be a hex colour (e.g. #0a1628 or #abc)")
+        layout.bg_color = body["bg_color"]
+
     layout.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify(layout.to_dict())
