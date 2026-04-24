@@ -19,6 +19,31 @@ class Config:
     SECRET_KEY = os.environ.get("SECRET_KEY", "change-me-in-production")
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
+    # PostgreSQL schema name to use when the DB is shared with other apps.
+    # Ignored when DATABASE_URL points at SQLite (SQLite has no schemas).
+    DATABASE_SCHEMA = os.environ.get("DATABASE_SCHEMA", "leash")
+
+    @classmethod
+    def init_app(cls, app):
+        """Common URL normalization and Postgres schema wiring.
+
+        Subclasses should call super().init_app(app) before adding their own logic.
+        """
+        uri = app.config.get("SQLALCHEMY_DATABASE_URI") or ""
+        # Heroku/Render style postgres:// → SQLAlchemy needs postgresql://
+        if uri.startswith("postgres://"):
+            uri = uri.replace("postgres://", "postgresql://", 1)
+            app.config["SQLALCHEMY_DATABASE_URI"] = uri
+
+        # On Postgres, pin every new connection's search_path to our schema so
+        # all unqualified CREATE TABLE statements (including alembic_version)
+        # land in DATABASE_SCHEMA.  No effect on SQLite.
+        if uri.startswith("postgresql"):
+            schema = app.config.get("DATABASE_SCHEMA") or "leash"
+            engine_opts = app.config.setdefault("SQLALCHEMY_ENGINE_OPTIONS", {})
+            connect_args = engine_opts.setdefault("connect_args", {})
+            connect_args["options"] = f"-csearch_path={schema},public"
+
     # --- Fallback values used before DB settings are loaded ---
     # These are seeded into the DB on first boot.  After that, the DB wins.
     NDI_SUBNET_PREFIX   = os.environ.get("NDI_SUBNET_PREFIX",   "10.1.248.")
@@ -57,9 +82,7 @@ class ProductionConfig(Config):
                 "SECRET_KEY must be set to a secure random value in production. "
                 "Set the SECRET_KEY environment variable before starting Leash."
             )
-        uri = cls.SQLALCHEMY_DATABASE_URI or ""
-        if uri.startswith("postgres://"):
-            cls.SQLALCHEMY_DATABASE_URI = uri.replace("postgres://", "postgresql://", 1)
+        super().init_app(app)
 
 
 config = {

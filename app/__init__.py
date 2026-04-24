@@ -47,6 +47,26 @@ def _configure_syslog(app: Flask) -> None:
     app.logger.warning("Leash: syslog socket not found — audit events will not go to syslog")
 
 
+def _ensure_pg_schema(app: Flask) -> None:
+    """If running on Postgres, CREATE SCHEMA IF NOT EXISTS for DATABASE_SCHEMA.
+
+    Must run before any migrations / table creation so that the search_path
+    on the connection has somewhere to point to.  No-op on SQLite.
+    """
+    uri = app.config.get("SQLALCHEMY_DATABASE_URI") or ""
+    if not uri.startswith("postgresql"):
+        return
+
+    schema = app.config.get("DATABASE_SCHEMA") or "leash"
+    # Quote the identifier defensively even though we control the value.
+    safe_schema = schema.replace('"', '""')
+    from sqlalchemy import text
+    with db.engine.connect() as conn:
+        conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{safe_schema}"'))
+        conn.commit()
+    logger.info("Leash: Postgres schema '%s' ready", schema)
+
+
 def _auto_migrate(app: Flask) -> None:
     """Apply any pending Alembic migrations on startup.
 
@@ -63,6 +83,8 @@ def _auto_migrate(app: Flask) -> None:
     versions_dir = migrations_dir / "versions"
 
     try:
+        _ensure_pg_schema(app)
+
         if not migrations_dir.exists():
             logger.info("Leash: initialising migrations directory")
             flask_db_init()
