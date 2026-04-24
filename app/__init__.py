@@ -105,6 +105,9 @@ def create_app(config_name: str = "default") -> Flask:
     app.register_blueprint(v1_bp, url_prefix="/api/v1")
     app.register_blueprint(schedules_api_bp, url_prefix="/api")
 
+    from app.__version__ import __version__
+    app.config["LEASH_VERSION"] = __version__
+
     _configure_syslog(app)
 
     with app.app_context():

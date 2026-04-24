@@ -47,6 +47,13 @@ logger = logging.getLogger(__name__)
 
 api_bp = Blueprint("api", __name__)
 
+
+@api_bp.route("/version", methods=["GET"])
+def version():
+    from app.__version__ import __version__
+    return jsonify({"version": __version__})
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
