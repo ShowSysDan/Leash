@@ -400,13 +400,39 @@ def run_async(coro):
         return asyncio.run(coro)
 
 
+def _bulk_timeout(timeout: int) -> aiohttp.ClientTimeout:
+    """Build a ClientTimeout with a short connect deadline inside the total budget.
+
+    Separating connect from read means a device that accepts the TCP handshake
+    but then stops sending data will still be cut off at `timeout` seconds,
+    while a device that never responds to SYN is cut off at connect_timeout.
+    """
+    connect_timeout = min(timeout, 3)
+    return aiohttp.ClientTimeout(total=timeout, connect=connect_timeout)
+
+
+def _bulk_connector(concurrency: int) -> aiohttp.TCPConnector:
+    """Return a TCPConnector whose pool cap matches the concurrency limit.
+
+    enable_cleanup_closed=True ensures sockets to unresponsive hosts are
+    actively cleaned up rather than leaking until the GC collects them.
+    keepalive_timeout matches the pool limit's useful life for short-lived
+    bulk operations.
+    """
+    return aiohttp.TCPConnector(
+        limit=concurrency,
+        enable_cleanup_closed=True,
+        keepalive_timeout=30,
+    )
+
+
 async def bulk_fetch_source(receivers: list, config: dict) -> list[dict]:
     """Lightweight poll: fetch ONLY the current NDI source from each receiver.
 
     Uses one HTTP call per device instead of the three required by bulk_fetch_status,
     making it suitable for frequent enforcement checks.
     Returns list of {"id", "online", "current_source"} dicts.
-    All requests share one aiohttp session for connection reuse.
+    All requests share one aiohttp session (and one connection pool) for reuse.
     """
     prefix = config.get("NDI_SUBNET_PREFIX", "10.1.248.")
     port = config.get("NDI_DEVICE_PORT", 8080)
@@ -415,7 +441,11 @@ async def bulk_fetch_source(receivers: list, config: dict) -> list[dict]:
     concurrency = config.get("RECALL_CONCURRENCY", 10)
     sem = asyncio.Semaphore(concurrency)
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+    connector = _bulk_connector(concurrency)
+    async with aiohttp.ClientSession(
+        connector=connector,
+        timeout=_bulk_timeout(timeout),
+    ) as session:
         async def _one(recv):
             async with sem:
                 ip = f"{prefix}{recv['ip_last_octet']}"
@@ -434,19 +464,31 @@ async def bulk_fetch_source(receivers: list, config: dict) -> list[dict]:
 
 async def bulk_fetch_status(receivers: list, config: dict) -> list[dict]:
     """Concurrently fetch status for a list of receiver dicts.
-    All requests share one aiohttp session for connection reuse."""
+
+    All requests share one aiohttp session and connection pool.
+    Concurrency is bounded by a semaphore (RECALL_CONCURRENCY) to prevent
+    flooding the switch when called on 200+ receivers simultaneously.
+    """
     prefix = config.get("NDI_SUBNET_PREFIX", "10.1.248.")
     port = config.get("NDI_DEVICE_PORT", 8080)
     password = config.get("NDI_DEVICE_PASSWORD", "birddog")
     timeout = config.get("HTTP_TIMEOUT", 5)
+    concurrency = config.get("RECALL_CONCURRENCY", 10)
+    # fetch_status fires 3 sub-tasks per receiver; keep inner parallelism in check.
+    sem = asyncio.Semaphore(concurrency)
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+    connector = _bulk_connector(concurrency)
+    async with aiohttp.ClientSession(
+        connector=connector,
+        timeout=_bulk_timeout(timeout),
+    ) as session:
         async def _one(recv):
-            ip = f"{prefix}{recv['ip_last_octet']}"
-            client = BirdDogClient(ip, port=port, password=password,
-                                   timeout=timeout, session=session)
-            status = await client.fetch_status()
-            status["id"] = recv["id"]
-            return status
+            async with sem:
+                ip = f"{prefix}{recv['ip_last_octet']}"
+                client = BirdDogClient(ip, port=port, password=password,
+                                       timeout=timeout, session=session)
+                status = await client.fetch_status()
+                status["id"] = recv["id"]
+                return status
 
         return await asyncio.gather(*[_one(r) for r in receivers], return_exceptions=False)

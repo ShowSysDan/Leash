@@ -20,10 +20,9 @@ Scan endpoint
 
 Source endpoints
   GET    /api/sources                     list cached sources
-  POST   /api/sources/discover            reset + list from a reference device
+  POST   /api/sources/discover            poll Tractus MV API and sync NDISource table
   DELETE /api/sources/<id>                remove cached source
 """
-import asyncio
 import logging
 from datetime import datetime
 
@@ -48,6 +47,7 @@ from app.services.birddog_client import (
     run_async,
 )
 from app.services.scanner import scan_subnet
+from app.services.tractus_client import fetch_sources
 
 logger = logging.getLogger(__name__)
 
@@ -427,54 +427,25 @@ def list_sources():
     return jsonify([s.to_dict() for s in sources])
 
 
-@api_bp.route("/sources/discover", methods=["POST"])
-def discover_sources():
+def _sync_sources(names: list[str]) -> tuple[list[str], list[str], int]:
+    """Upsert NDISource rows from a list of source names.
+
+    Returns (added, updated, going_offline_count).
     """
-    Trigger NDI source discovery on a reference device (first online receiver
-    by default, or pass receiver_id in the JSON body).  Runs /reset then waits
-    3 s before calling /List, then caches all returned sources.
-    """
-    body = request.get_json(silent=True) or {}
-    receiver_id = body.get("receiver_id")
-
-    if receiver_id:
-        receiver = NDIReceiver.query.get_or_404(receiver_id)
-    else:
-        receiver = NDIReceiver.query.filter_by(status="online").order_by(NDIReceiver.index).first()
-        if not receiver:
-            receiver = NDIReceiver.query.order_by(NDIReceiver.index).first()
-        if not receiver:
-            return _err("No receivers configured", 404)
-
-    async def _discover():
-        client = client_from_receiver(receiver, current_app.config)
-        await client.reset_ndi()
-        await asyncio.sleep(3)
-        code, data = await client.get_ndi_list()
-        return code, data
-
-    code, data = run_async(_discover())
-
-    if code != 200:
-        device_error(receiver.ip_address, "discover_sources", code)
-        return jsonify({"error": "Discovery failed", "status": code, "response": data}), 502
-
-    if not isinstance(data, dict):
-        return jsonify({"error": "Unexpected response format", "raw": data}), 502
-
     now = datetime.utcnow()
-    added = []
-    updated = []
+    added: list[str] = []
+    updated: list[str] = []
+    seen: set[str] = set()
 
-    for name in data:
+    for name in names:
         clean = name.strip()
-        if not clean or clean == "None":
+        if not clean:
             continue
+        seen.add(clean)
         existing = NDISource.query.filter_by(name=clean).first()
         if existing:
             existing.discovered = True
             existing.last_seen = now
-            # Back-fill source_index for rows created before this field existed
             if existing.source_index is None:
                 existing.source_index = NDISource.next_index()
                 db.session.flush()
@@ -487,23 +458,41 @@ def discover_sources():
                 source_index=NDISource.next_index(),
             )
             db.session.add(new_src)
-            db.session.flush()   # make source_index available immediately for next_index()
+            db.session.flush()
             added.append(clean)
 
-    # Mark previously-discovered sources that are no longer visible as offline
-    seen_names = {n.strip() for n in data if n.strip() and n.strip() != "None"}
     going_offline_count = NDISource.query.filter(
-        NDISource.discovered == True,
-        NDISource.name.notin_(seen_names),
+        NDISource.discovered == True,   # noqa: E712
+        NDISource.name.notin_(seen),
     ).count()
     NDISource.query.filter(
-        NDISource.discovered == True,
-        NDISource.name.notin_(seen_names),
+        NDISource.discovered == True,   # noqa: E712
+        NDISource.name.notin_(seen),
     ).update({"discovered": False}, synchronize_session=False)
 
     db.session.commit()
+    return added, updated, going_offline_count
 
-    sources_discovered(added, updated, going_offline_count, via=receiver.ip_address)
+
+@api_bp.route("/sources/discover", methods=["POST"])
+def discover_sources():
+    """
+    Manually trigger a Tractus MV API poll and sync the NDISource table.
+    Primary host is tried first; the fallback host is used if primary is unreachable.
+    """
+    cfg = current_app.config
+    names = run_async(fetch_sources(
+        hosts=cfg["TRACTUS_MV_HOSTS"],
+        port=cfg["TRACTUS_MV_PORT"],
+        timeout=cfg["HTTP_TIMEOUT"],
+    ))
+
+    if names is None:
+        return jsonify({"error": "Tractus MV API unreachable"}), 502
+
+    added, updated, going_offline_count = _sync_sources(names)
+
+    sources_discovered(added, updated, going_offline_count, via="tractus-mv")
 
     all_sources = NDISource.query.order_by(NDISource.source_index).all()
     return jsonify({

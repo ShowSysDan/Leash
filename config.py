@@ -22,6 +22,21 @@ class Config:
     # How often (seconds) the enforcement poller checks active persistence windows
     ENFORCEMENT_INTERVAL = int(os.environ.get("ENFORCEMENT_INTERVAL", 60))
 
+    # Tractus MV API — source of truth for available NDI sources
+    # Comma-separated list of hosts; tried in order, first success wins.
+    TRACTUS_MV_HOSTS = [
+        h.strip() for h in
+        os.environ.get("TRACTUS_MV_HOSTS", "10.1.248.191,10.1.248.192").split(",")
+        if h.strip()
+    ]
+    TRACTUS_MV_PORT = int(os.environ.get("TRACTUS_MV_PORT", 8901))
+
+    # How often (seconds) the background job syncs NDISource table from Tractus MV
+    SOURCE_POLL_INTERVAL = int(os.environ.get("SOURCE_POLL_INTERVAL", 60))
+
+    # How often (seconds) the background job polls receiver current_source
+    RECEIVER_POLL_INTERVAL = int(os.environ.get("RECEIVER_POLL_INTERVAL", 15))
+
     # External API key — leave unset to disable auth (open network only)
     API_KEY = os.environ.get("API_KEY") or None
 
