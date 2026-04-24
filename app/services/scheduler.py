@@ -63,8 +63,13 @@ def init_scheduler(app) -> BackgroundScheduler:
     _scheduler.start()
     logger.info("Leash scheduler: started (pid=%d, enforcement_interval=%ds)", os.getpid(), interval)
 
+    # atexit runs during graceful shutdown (gunicorn's default on SIGTERM),
+    # which is enough for a clean scheduler stop.  A SIGKILL will cut the
+    # process off before atexit runs, but at that point the scheduler is
+    # going away regardless.  Deliberately NOT overriding SIGTERM — that
+    # would conflict with gunicorn's own graceful-shutdown handler.
     import atexit
-    atexit.register(lambda: _scheduler.shutdown(wait=False))
+    atexit.register(lambda: _scheduler.shutdown(wait=False) if _scheduler else None)
 
     return _scheduler
 
