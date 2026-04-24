@@ -17,7 +17,7 @@ Current version: **1.0.0**
 | **Source registry** | NDI sources persist in the DB with a **stable index** that never changes, even when a source goes offline |
 | **Groups** | Tag receivers into named groups; send one source to all members at once |
 | **Layouts** | Drag-and-drop spatial canvas pages that mirror your physical room floor plan |
-| **Snapshots** | Save and one-click recall full routing state across all devices |
+| **Snapshots** | Save and recall routing state — full or partial (any subset of receivers) |
 | **Schedules** | Cron-like automation — recall a snapshot on selected days at a set time |
 | **Persistent enforcement** | After a scheduled recall, poll receivers and correct any source drift for a configurable window |
 | **External API** | `/api/v1/` for QSYS, Crestron, AMX — route by stable index or source name |
@@ -304,9 +304,9 @@ Body (optional): `{"start": 1, "end": 254}`
 | Method | Endpoint | Description |
 |---|---|---|
 | GET | `/api/snapshots` | List all |
-| POST | `/api/snapshots` | Capture `{"name":"...","receiver_ids":[...]}` (omit ids for all) |
-| GET | `/api/snapshots/<id>` | Get with entries |
-| POST | `/api/snapshots/<id>/recall` | Recall to all (or subset) `{"receiver_ids":[...]}` |
+| POST | `/api/snapshots` | Capture `{"name":"...","receiver_ids":[1,2]}` — omit `receiver_ids` to capture all receivers |
+| GET | `/api/snapshots/<id>` | Get snapshot with all entries |
+| POST | `/api/snapshots/<id>/recall` | Recall — pass `{"receiver_ids":[1,2]}` to restore only a subset, omit for all |
 | DELETE | `/api/snapshots/<id>` | Delete |
 
 #### Schedules

@@ -54,9 +54,9 @@ First stable release. Full replacement for the QSYS Lua NDI routing script.
 - 30-second auto-poll keeps status current while a layout page is open
 
 #### Snapshots
-- Capture the current NDI source assignment for all (or selected) receivers
+- Capture the current NDI source assignment for **all or any subset** of receivers — useful for targeting just a few devices
 - Preview snapshot entries before recalling — shows saved source vs. current
-- Recall applies all sources concurrently across all devices
+- Recall can be applied to all entries or narrowed to a subset at recall time
 - Per-recall progress modal
 
 #### Scheduled Recalls
