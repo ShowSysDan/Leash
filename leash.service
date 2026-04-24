@@ -1,0 +1,25 @@
+[Unit]
+Description=Leash NDI Receiver Control
+After=network.target
+
+[Service]
+# Run as the user who owns ~/Leash
+User=%i
+Group=%i
+WorkingDirectory=%h/Leash
+EnvironmentFile=%h/Leash/.env
+
+# Activate the venv and run Gunicorn
+ExecStart=%h/Leash/venv/bin/gunicorn \
+    --workers 2 \
+    --bind 0.0.0.0:5000 \
+    --timeout 120 \
+    --access-logfile - \
+    --error-logfile - \
+    run:app
+
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target

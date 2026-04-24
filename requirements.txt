@@ -1,0 +1,9 @@
+Flask==3.0.3
+Flask-SQLAlchemy==3.1.1
+Flask-Migrate==4.0.7
+aiohttp==3.9.5
+python-dotenv==1.0.1
+psycopg2-binary==2.9.9
+SQLAlchemy==2.0.30
+Werkzeug==3.0.3
+gunicorn==22.0.0

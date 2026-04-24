@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}NDI Sources — Leash{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center mb-3 gap-3">
+  <h4 class="mb-0 text-light">
+    NDI Sources
+    <span class="badge bg-secondary ms-1">{{ sources|length }}</span>
+  </h4>
+  <div class="ms-auto d-flex gap-2">
+    <button id="btn-discover-page" class="btn btn-sm btn-warning">
+      <i class="bi bi-radar me-1"></i>Discover from Network
+    </button>
+  </div>
+</div>
+
+<p class="text-muted small">
+  Sources are cached in the database so they remain available even when devices
+  are offline.  Run <strong>Discover</strong> to refresh the list from a live
+  BirdDog decoder.  Previously seen sources are kept with
+  <span class="badge bg-secondary">cached</span> status until they are
+  rediscovered or manually deleted.
+</p>
+
+{% if not sources %}
+<div class="alert alert-secondary text-center py-5">
+  <i class="bi bi-collection-play display-4 d-block mb-2"></i>
+  No sources in database yet. Click <strong>Discover from Network</strong>.
+</div>
+{% else %}
+<div class="table-responsive">
+  <table class="table table-dark table-hover table-sm align-middle">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th class="text-center">Status</th>
+        <th>Last Seen</th>
+        <th class="text-end">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="sources-table-body">
+      {% for s in sources %}
+      <tr id="src-row-{{ s.id }}">
+        <td class="text-break">{{ s.name }}</td>
+        <td class="text-center">
+          {% if s.discovered %}
+          <span class="badge bg-success">live</span>
+          {% else %}
+          <span class="badge bg-secondary">cached</span>
+          {% endif %}
+        </td>
+        <td>
+          <small class="text-muted">
+            {{ s.last_seen.strftime('%Y-%m-%d %H:%M') if s.last_seen else '—' }}
+          </small>
+        </td>
+        <td class="text-end">
+          <button class="btn btn-xs btn-outline-danger btn-delete-source"
+                  data-source-id="{{ s.id }}" data-source-name="{{ s.name }}">
+            <i class="bi bi-trash"></i>
+          </button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('btn-discover-page')?.addEventListener('click', () => {
+  window.Leash.discoverSources();
+});
+
+document.querySelectorAll('.btn-delete-source').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const id = btn.dataset.sourceId;
+    const name = btn.dataset.sourceName;
+    if (!confirm(`Delete source "${name}"?`)) return;
+    const resp = await fetch(`/api/sources/${id}`, { method: 'DELETE' });
+    if (resp.ok) {
+      document.getElementById(`src-row-${id}`)?.remove();
+      window.Leash.toast('Source deleted', 'warning');
+    }
+  });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,374 @@
+"""
+Async HTTP client wrapping the BirdDog REST API v2.0.
+
+All public methods return (status_code: int, data: Any).
+status_code == 0 means a network/timeout error occurred.
+"""
+import asyncio
+import json
+import logging
+from typing import Any, Optional
+
+import aiohttp
+
+logger = logging.getLogger(__name__)
+
+# Some older BirdDog firmware uses different capitalisation on a handful of
+# endpoints.  The documented v2 paths are used here; set LEGACY_PATHS=True on
+# a BirdDogClient instance to switch to the older capitalisation if needed.
+LEGACY_PATH_MAP = {
+    "/connectTo": "/ConnectTo",
+    "/hostname": "/HostName",
+    "/List": "/List",  # unchanged
+    "/reset": "/reset",  # unchanged
+}
+
+
+class BirdDogClient:
+    def __init__(
+        self,
+        ip: str,
+        port: int = 8080,
+        password: str = "birddog",
+        timeout: int = 5,
+        legacy_paths: bool = False,
+    ):
+        self.ip = ip
+        self.port = port
+        self.password = password
+        self.timeout = aiohttp.ClientTimeout(total=timeout)
+        self.base_url = f"http://{ip}:{port}"
+        self.legacy_paths = legacy_paths
+
+    def _path(self, endpoint: str) -> str:
+        if self.legacy_paths and endpoint in LEGACY_PATH_MAP:
+            return LEGACY_PATH_MAP[endpoint]
+        return endpoint
+
+    def _headers(self) -> dict:
+        return {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "Leash/1.0",
+        }
+
+    async def _get(self, endpoint: str) -> tuple[int, Any]:
+        url = f"{self.base_url}{self._path(endpoint)}"
+        try:
+            async with aiohttp.ClientSession(timeout=self.timeout) as session:
+                async with session.get(url, headers=self._headers()) as resp:
+                    text = await resp.text()
+                    return resp.status, _try_json(text)
+        except asyncio.TimeoutError:
+            logger.warning("Timeout GET %s", url)
+            return 0, "timeout"
+        except aiohttp.ClientError as exc:
+            logger.warning("Error GET %s: %s", url, exc)
+            return 0, str(exc)
+
+    async def _post(self, endpoint: str, data: Any = None, raw_text: bool = False) -> tuple[int, Any]:
+        url = f"{self.base_url}{self._path(endpoint)}"
+        try:
+            async with aiohttp.ClientSession(timeout=self.timeout) as session:
+                if raw_text:
+                    async with session.post(
+                        url,
+                        data=str(data) if data is not None else "",
+                        headers={**self._headers(), "Content-Type": "text/plain"},
+                    ) as resp:
+                        text = await resp.text()
+                        return resp.status, _try_json(text)
+                else:
+                    async with session.post(url, json=data, headers=self._headers()) as resp:
+                        text = await resp.text()
+                        return resp.status, _try_json(text)
+        except asyncio.TimeoutError:
+            logger.warning("Timeout POST %s", url)
+            return 0, "timeout"
+        except aiohttp.ClientError as exc:
+            logger.warning("Error POST %s: %s", url, exc)
+            return 0, str(exc)
+
+    # -------------------------------------------------------------------------
+    # BasicDeviceInfo
+    # -------------------------------------------------------------------------
+
+    async def get_about(self) -> tuple[int, Any]:
+        return await self._get("/about")
+
+    async def get_hostname(self) -> tuple[int, Any]:
+        return await self._get("/hostname")
+
+    async def reboot(self) -> tuple[int, Any]:
+        return await self._get("/reboot")
+
+    async def restart(self) -> tuple[int, Any]:
+        return await self._get("/restart")
+
+    async def get_version(self) -> tuple[int, Any]:
+        return await self._get("/version")
+
+    # -------------------------------------------------------------------------
+    # DeviceSettings
+    # -------------------------------------------------------------------------
+
+    async def get_analog_audio(self) -> tuple[int, Any]:
+        return await self._get("/analogaudiosetup")
+
+    async def set_analog_audio(self, data: dict) -> tuple[int, Any]:
+        return await self._post("/analogaudiosetup", data)
+
+    async def get_operation_mode(self) -> tuple[int, Any]:
+        return await self._get("/operationmode")
+
+    async def set_operation_mode(self, mode: str) -> tuple[int, Any]:
+        # API expects plain text body: "encode" or "decode"
+        return await self._post("/operationmode", mode, raw_text=True)
+
+    async def get_video_output_interface(self) -> tuple[int, Any]:
+        return await self._get("/videooutputinterface")
+
+    async def set_video_output_interface(self, mode: str) -> tuple[int, Any]:
+        return await self._post("/videooutputinterface", mode, raw_text=True)
+
+    # -------------------------------------------------------------------------
+    # NDI Encode
+    # -------------------------------------------------------------------------
+
+    async def get_encode_transport(self) -> tuple[int, Any]:
+        return await self._get("/encodeTransport")
+
+    async def set_encode_transport(self, data: dict) -> tuple[int, Any]:
+        return await self._post("/encodeTransport", data)
+
+    async def get_encode_setup(self) -> tuple[int, Any]:
+        return await self._get("/encodesetup")
+
+    async def set_encode_setup(self, data: dict) -> tuple[int, Any]:
+        return await self._post("/encodesetup", data)
+
+    # -------------------------------------------------------------------------
+    # NDI Decode
+    # -------------------------------------------------------------------------
+
+    async def get_connect_to(self) -> tuple[int, Any]:
+        return await self._get("/connectTo")
+
+    async def set_connect_to(self, source_name: str) -> tuple[int, Any]:
+        return await self._post("/connectTo", {"sourceName": source_name})
+
+    async def get_decode_transport(self) -> tuple[int, Any]:
+        return await self._get("/decodeTransport")
+
+    async def set_decode_transport(self, data: dict) -> tuple[int, Any]:
+        return await self._post("/decodeTransport", data)
+
+    async def get_decode_setup(self) -> tuple[int, Any]:
+        return await self._get("/decodesetup")
+
+    async def set_decode_setup(self, data: dict) -> tuple[int, Any]:
+        return await self._post("/decodesetup", data)
+
+    async def get_decode_status(self) -> tuple[int, Any]:
+        return await self._get("/decodestatus")
+
+    async def capture(self) -> tuple[int, Any]:
+        return await self._get("/capture")
+
+    # -------------------------------------------------------------------------
+    # NDI Finder
+    # -------------------------------------------------------------------------
+
+    async def get_ndi_list(self) -> tuple[int, Any]:
+        return await self._get("/List")
+
+    async def reset_ndi(self) -> tuple[int, Any]:
+        return await self._get("/reset")
+
+    async def refresh_ndi(self) -> tuple[int, Any]:
+        return await self._get("/refresh")
+
+    async def get_ndi_discovery_server(self) -> tuple[int, Any]:
+        return await self._get("/NDIDisServer")
+
+    async def set_ndi_discovery_server(self, data: dict) -> tuple[int, Any]:
+        return await self._post("/NDIDisServer", data)
+
+    async def get_ndi_group_name(self) -> tuple[int, Any]:
+        return await self._get("/NDIGrpName")
+
+    async def set_ndi_group_name(self, name: str) -> tuple[int, Any]:
+        return await self._post("/NDIGrpName", name, raw_text=True)
+
+    async def get_ndi_off_subnet(self) -> tuple[int, Any]:
+        return await self._get("/NDIOffSnSrc")
+
+    async def set_ndi_off_subnet(self, ip: str) -> tuple[int, Any]:
+        return await self._post("/NDIOffSnSrc", ip, raw_text=True)
+
+    # -------------------------------------------------------------------------
+    # PTZ
+    # -------------------------------------------------------------------------
+
+    async def get_ptz_setup(self) -> tuple[int, Any]:
+        return await self._get("/birddogptzsetup")
+
+    async def set_ptz_setup(self, data: dict) -> tuple[int, Any]:
+        return await self._post("/birddogptzsetup", data)
+
+    async def recall_preset(self, preset: str) -> tuple[int, Any]:
+        return await self._post("/recall", {"Preset": preset})
+
+    async def save_preset(self, preset: str) -> tuple[int, Any]:
+        return await self._post("/save", {"Preset": preset})
+
+    # -------------------------------------------------------------------------
+    # Camera image settings
+    # -------------------------------------------------------------------------
+
+    async def get_exposure(self) -> tuple[int, Any]:
+        return await self._get("/birddogexpsetup")
+
+    async def set_exposure(self, data: dict) -> tuple[int, Any]:
+        return await self._post("/birddogexpsetup", data)
+
+    async def get_white_balance(self) -> tuple[int, Any]:
+        return await self._get("/birddogwbsetup")
+
+    async def set_white_balance(self, data: dict) -> tuple[int, Any]:
+        return await self._post("/birddogwbsetup", data)
+
+    async def get_picture(self) -> tuple[int, Any]:
+        return await self._get("/birddogpicsetup")
+
+    async def set_picture(self, data: dict) -> tuple[int, Any]:
+        return await self._post("/birddogpicsetup", data)
+
+    async def get_colour_matrix(self) -> tuple[int, Any]:
+        return await self._get("/birddogcmsetup")
+
+    async def set_colour_matrix(self, data: dict) -> tuple[int, Any]:
+        return await self._post("/birddogcmsetup", data)
+
+    async def get_advanced(self) -> tuple[int, Any]:
+        return await self._get("/birddogadvancesetup")
+
+    async def set_advanced(self, data: dict) -> tuple[int, Any]:
+        return await self._post("/birddogadvancesetup", data)
+
+    async def get_external(self) -> tuple[int, Any]:
+        return await self._get("/birddogexternalsetup")
+
+    async def set_external(self, data: dict) -> tuple[int, Any]:
+        return await self._post("/birddogexternalsetup", data)
+
+    async def get_detail(self) -> tuple[int, Any]:
+        return await self._get("/birddogdetsetup")
+
+    async def set_detail(self, data: dict) -> tuple[int, Any]:
+        return await self._post("/birddogdetsetup", data)
+
+    async def get_gamma(self) -> tuple[int, Any]:
+        return await self._get("/birddoggammasetup")
+
+    async def set_gamma(self, data: dict) -> tuple[int, Any]:
+        return await self._post("/birddoggammasetup", data)
+
+    async def get_sil2_codec(self) -> tuple[int, Any]:
+        return await self._get("/birddogsil2codec")
+
+    async def set_sil2_codec(self, data: dict) -> tuple[int, Any]:
+        return await self._post("/birddogsil2codec", data)
+
+    async def get_sil2_enc(self) -> tuple[int, Any]:
+        return await self._get("/birddogsil2enc")
+
+    async def set_sil2_enc(self, data: dict) -> tuple[int, Any]:
+        return await self._post("/birddogsil2enc", data)
+
+    # -------------------------------------------------------------------------
+    # Composite helpers
+    # -------------------------------------------------------------------------
+
+    async def fetch_status(self) -> dict:
+        """Fetch hostname, current source, about info in one shot."""
+        hostname_task = asyncio.create_task(self.get_hostname())
+        connect_task = asyncio.create_task(self.get_connect_to())
+        about_task = asyncio.create_task(self.get_about())
+
+        h_code, h_data = await hostname_task
+        c_code, c_data = await connect_task
+        a_code, a_data = await about_task
+
+        online = h_code == 200
+
+        hostname = None
+        if h_code == 200 and isinstance(h_data, str):
+            hostname = h_data.strip()
+
+        current_source = None
+        if c_code == 200 and isinstance(c_data, dict):
+            current_source = c_data.get("sourceName", "").strip()
+
+        firmware = None
+        serial = None
+        video_format = None
+        if a_code == 200 and isinstance(a_data, dict):
+            firmware = a_data.get("FirmwareVersion")
+            serial = a_data.get("SerialNumber")
+            video_format = a_data.get("Format")
+
+        return {
+            "online": online,
+            "hostname": hostname,
+            "current_source": current_source,
+            "firmware_version": firmware,
+            "serial_number": serial,
+            "video_format": video_format,
+        }
+
+
+def _try_json(text: str) -> Any:
+    """Return parsed JSON if possible, otherwise return stripped string."""
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return text.strip() if isinstance(text, str) else text
+
+
+# ---------------------------------------------------------------------------
+# Sync helpers for use inside Flask route handlers
+# ---------------------------------------------------------------------------
+
+def run_async(coro):
+    """Run an async coroutine from synchronous Flask code."""
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # Inside an already-running loop (e.g. some WSGI wrappers) —
+            # create a new loop in a thread instead.
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(asyncio.run, coro)
+                return future.result()
+        return loop.run_until_complete(coro)
+    except RuntimeError:
+        return asyncio.run(coro)
+
+
+async def bulk_fetch_status(receivers: list, config: dict) -> list[dict]:
+    """Concurrently fetch status for a list of receiver dicts."""
+    prefix = config.get("NDI_SUBNET_PREFIX", "10.1.248.")
+    port = config.get("NDI_DEVICE_PORT", 8080)
+    password = config.get("NDI_DEVICE_PASSWORD", "birddog")
+    timeout = config.get("HTTP_TIMEOUT", 5)
+
+    async def _one(recv):
+        ip = f"{prefix}{recv['ip_last_octet']}"
+        client = BirdDogClient(ip, port=port, password=password, timeout=timeout)
+        status = await client.fetch_status()
+        status["id"] = recv["id"]
+        return status
+
+    tasks = [asyncio.create_task(_one(r)) for r in receivers]
+    return await asyncio.gather(*tasks, return_exceptions=False)

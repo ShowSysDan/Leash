@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %}{{ receiver.label or ('Receiver ' ~ receiver.index) }} — Leash{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center mb-3 gap-2">
+  <a href="{{ url_for('main.index') }}" class="btn btn-sm btn-outline-secondary">
+    <i class="bi bi-arrow-left"></i>
+  </a>
+  <h4 class="mb-0 text-light">
+    <span class="status-dot status-{{ receiver.status }}"></span>
+    {{ receiver.label or ('Receiver ' ~ receiver.index) }}
+  </h4>
+  <span class="text-muted ms-2">{{ receiver.ip_address }}</span>
+  <div class="ms-auto d-flex gap-2">
+    <button id="btn-poll" class="btn btn-sm btn-outline-info"
+            data-receiver-id="{{ receiver.id }}">
+      <i class="bi bi-arrow-repeat me-1"></i>Refresh
+    </button>
+    <button id="btn-restart" class="btn btn-sm btn-outline-warning"
+            data-receiver-id="{{ receiver.id }}">
+      <i class="bi bi-camera-video-off me-1"></i>Restart Video
+    </button>
+    <button id="btn-reboot" class="btn btn-sm btn-outline-danger"
+            data-receiver-id="{{ receiver.id }}">
+      <i class="bi bi-power me-1"></i>Reboot
+    </button>
+  </div>
+</div>
+
+<div class="row g-3">
+  <!-- Info card -->
+  <div class="col-md-4">
+    <div class="card h-100">
+      <div class="card-header">Device Info</div>
+      <div class="card-body">
+        <dl class="row mb-0 small">
+          <dt class="col-5 text-muted">Hostname</dt>
+          <dd class="col-7" id="detail-hostname">{{ receiver.hostname or '—' }}</dd>
+          <dt class="col-5 text-muted">IP</dt>
+          <dd class="col-7">{{ receiver.ip_address }}</dd>
+          <dt class="col-5 text-muted">Status</dt>
+          <dd class="col-7" id="detail-status">{{ receiver.status }}</dd>
+          <dt class="col-5 text-muted">Firmware</dt>
+          <dd class="col-7" id="detail-firmware">{{ receiver.firmware_version or '—' }}</dd>
+          <dt class="col-5 text-muted">Serial</dt>
+          <dd class="col-7" id="detail-serial">{{ receiver.serial_number or '—' }}</dd>
+          <dt class="col-5 text-muted">Format</dt>
+          <dd class="col-7" id="detail-format">{{ receiver.video_format or '—' }}</dd>
+        </dl>
+      </div>
+    </div>
+  </div>
+
+  <!-- Source selection card -->
+  <div class="col-md-8">
+    <div class="card h-100">
+      <div class="card-header">NDI Source</div>
+      <div class="card-body">
+        <div class="mb-2 text-muted small">
+          Current: <strong id="detail-current-source">{{ receiver.current_source or 'None' }}</strong>
+        </div>
+        <select id="detail-source-select" class="form-select mb-3"
+                data-receiver-id="{{ receiver.id }}">
+          <option value="">— select source —</option>
+          {% for s in sources %}
+          <option value="{{ s.name }}"
+                  {% if receiver.current_source == s.name %}selected{% endif %}>
+            {{ s.name }}{% if not s.discovered %} (cached){% endif %}
+          </option>
+          {% endfor %}
+          <option value="Reboot">⚡ Reboot Device</option>
+        </select>
+        <button id="btn-set-source" class="btn btn-primary"
+                data-receiver-id="{{ receiver.id }}">
+          <i class="bi bi-check2 me-1"></i>Set Source
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings tabs -->
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header">
+        <ul class="nav nav-tabs card-header-tabs" id="settingsTabs">
+          <li class="nav-item">
+            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-decode">Decode</button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-transport">Transport</button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-audio">Audio</button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-ptz">PTZ</button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-picture">Picture</button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-exposure">Exposure</button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-wb">White Bal.</button>
+          </li>
+          <li class="nav-item">
+            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-raw">Raw JSON</button>
+          </li>
+        </ul>
+      </div>
+      <div class="tab-content card-body" id="settingsTabContent">
+
+        <div class="tab-pane fade show active" id="tab-decode">
+          {% include "partials/settings_panel.html" with context %}
+          <!-- JS fills this via loadSettings('decode_setup') -->
+          <div class="settings-loader" data-group="decode_setup"
+               data-receiver-id="{{ receiver.id }}"></div>
+        </div>
+
+        <div class="tab-pane fade" id="tab-transport">
+          <div class="settings-loader" data-group="decode_transport"
+               data-receiver-id="{{ receiver.id }}"></div>
+        </div>
+
+        <div class="tab-pane fade" id="tab-audio">
+          <div class="settings-loader" data-group="analog_audio"
+               data-receiver-id="{{ receiver.id }}"></div>
+        </div>
+
+        <div class="tab-pane fade" id="tab-ptz">
+          <div class="settings-loader" data-group="ptz"
+               data-receiver-id="{{ receiver.id }}"></div>
+        </div>
+
+        <div class="tab-pane fade" id="tab-picture">
+          <div class="settings-loader" data-group="picture"
+               data-receiver-id="{{ receiver.id }}"></div>
+        </div>
+
+        <div class="tab-pane fade" id="tab-exposure">
+          <div class="settings-loader" data-group="exposure"
+               data-receiver-id="{{ receiver.id }}"></div>
+        </div>
+
+        <div class="tab-pane fade" id="tab-wb">
+          <div class="settings-loader" data-group="white_balance"
+               data-receiver-id="{{ receiver.id }}"></div>
+        </div>
+
+        <div class="tab-pane fade" id="tab-raw">
+          <div class="settings-loader" data-group="decode_status"
+               data-receiver-id="{{ receiver.id }}"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+window.LEASH = window.LEASH || {};
+window.LEASH.receiverId = {{ receiver.id }};
+window.LEASH.sources = {{ sources | map(attribute='name') | list | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/receiver_detail.js') }}"></script>
+{% endblock %}
