@@ -254,5 +254,4 @@ returns 404 on standard paths, instantiate `BirdDogClient` with
 | `NDI_SUBNET_PREFIX` | `10.1.248.` | Fixed IP prefix for all receivers |
 | `NDI_DEVICE_PORT` | `8080` | BirdDog HTTP API port |
 | `NDI_DEVICE_PASSWORD` | `birddog` | BirdDog device password |
-| `NDI_MAX_RECEIVERS` | `83` | Maximum receiver count |
 | `HTTP_TIMEOUT` | `5` | Per-request timeout in seconds |
