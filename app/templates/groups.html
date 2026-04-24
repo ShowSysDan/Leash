@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% block title %}Groups — Leash{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center mb-3 gap-3 flex-wrap">
+  <h4 class="mb-0 text-light"><i class="bi bi-tags me-2"></i>Groups
+    <span class="badge bg-secondary ms-1">{{ groups|length }}</span>
+  </h4>
+  <div class="ms-auto">
+    <button class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#createGroupModal">
+      <i class="bi bi-plus-circle me-1"></i>New Group
+    </button>
+  </div>
+</div>
+
+<p class="text-muted small mb-3">
+  Tag receivers into groups to send a source to all of them at once.
+  A receiver can belong to multiple groups.
+</p>
+
+{% if not groups %}
+<div class="alert alert-secondary text-center py-5">
+  <i class="bi bi-tags display-4 d-block mb-2"></i>
+  No groups yet. Create one to start organising receivers.
+</div>
+{% else %}
+<div class="row g-3" id="groups-container">
+  {% for group in groups %}
+  <div class="col-md-6 col-xl-4" id="group-col-{{ group.id }}">
+    <div class="card h-100 group-card">
+      <div class="card-header d-flex align-items-center gap-2">
+        <span class="group-swatch" style="background:{{ group.color }}"></span>
+        <strong>{{ group.name }}</strong>
+        <span class="badge bg-secondary ms-1">{{ group.receivers|length }}</span>
+        <div class="ms-auto d-flex gap-1">
+          <button class="btn btn-xs btn-outline-secondary btn-edit-group"
+                  data-group-id="{{ group.id }}"
+                  data-group-name="{{ group.name }}"
+                  data-group-color="{{ group.color }}"
+                  data-group-description="{{ group.description or '' }}"
+                  title="Edit group">
+            <i class="bi bi-pencil"></i>
+          </button>
+          <button class="btn btn-xs btn-outline-danger btn-delete-group"
+                  data-group-id="{{ group.id }}" data-group-name="{{ group.name }}"
+                  title="Delete group">
+            <i class="bi bi-trash"></i>
+          </button>
+        </div>
+      </div>
+      <div class="card-body pb-2">
+        {% if group.description %}
+        <p class="text-muted small mb-2">{{ group.description }}</p>
+        {% endif %}
+
+        <!-- Send source to all -->
+        <div class="input-group input-group-sm mb-3">
+          <select class="form-select group-source-select" data-group-id="{{ group.id }}">
+            <option value="">— send source to all —</option>
+            {% for s in sources %}
+            <option value="{{ s.name }}">{{ s.name }}</option>
+            {% endfor %}
+          </select>
+          <button class="btn btn-warning btn-send-group-source" data-group-id="{{ group.id }}">
+            <i class="bi bi-send me-1"></i>Send
+          </button>
+        </div>
+
+        <!-- Members -->
+        <div class="group-members" id="members-{{ group.id }}">
+          {% if group.receivers %}
+          <div class="d-flex flex-wrap gap-1">
+            {% for r in group.receivers | sort(attribute='index') %}
+            <span class="badge group-member-badge"
+                  style="background:{{ group.color }}22; border:1px solid {{ group.color }}; color:#eee;"
+                  data-receiver-id="{{ r.id }}"
+                  data-group-id="{{ group.id }}">
+              <span class="status-dot status-{{ r.status }} me-1" style="width:6px;height:6px;"></span>
+              {{ r.hostname or r.ip_last_octet }}
+              <button type="button" class="btn-close btn-close-white ms-1 btn-remove-member"
+                      style="font-size:0.5rem;"
+                      data-receiver-id="{{ r.id }}"
+                      data-group-id="{{ group.id }}"
+                      aria-label="Remove"></button>
+            </span>
+            {% endfor %}
+          </div>
+          {% else %}
+          <small class="text-muted">No receivers assigned.</small>
+          {% endif %}
+        </div>
+      </div>
+      <div class="card-footer py-2">
+        <button class="btn btn-xs btn-outline-secondary w-100 btn-manage-members"
+                data-group-id="{{ group.id }}" data-group-name="{{ group.name }}">
+          <i class="bi bi-person-plus me-1"></i>Manage Members
+        </button>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Create Group Modal -->
+<div class="modal fade" id="createGroupModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">New Group</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Name</label>
+          <input type="text" id="cg-name" class="form-control" placeholder="Level 2 South">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Description <small class="text-muted">(optional)</small></label>
+          <input type="text" id="cg-desc" class="form-control" placeholder="All L2 south-side displays">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Colour</label>
+          <div class="d-flex gap-2 flex-wrap" id="cg-color-swatches">
+            {% for c in ['#0d6efd','#198754','#dc3545','#ffc107','#0dcaf0','#6f42c1','#fd7e14','#20c997'] %}
+            <div class="color-swatch {% if loop.first %}selected{% endif %}"
+                 style="background:{{ c }}" data-color="{{ c }}"></div>
+            {% endfor %}
+          </div>
+          <input type="hidden" id="cg-color" value="#0d6efd">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" id="btn-create-group">Create</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Group Modal -->
+<div class="modal fade" id="editGroupModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Edit Group</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="eg-id">
+        <div class="mb-3">
+          <label class="form-label">Name</label>
+          <input type="text" id="eg-name" class="form-control">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Description</label>
+          <input type="text" id="eg-desc" class="form-control">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Colour</label>
+          <div class="d-flex gap-2 flex-wrap" id="eg-color-swatches">
+            {% for c in ['#0d6efd','#198754','#dc3545','#ffc107','#0dcaf0','#6f42c1','#fd7e14','#20c997'] %}
+            <div class="color-swatch" style="background:{{ c }}" data-color="{{ c }}"></div>
+            {% endfor %}
+          </div>
+          <input type="hidden" id="eg-color" value="#0d6efd">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" id="btn-save-group">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Manage Members Modal -->
+<div class="modal fade" id="membersModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Manage Members — <span id="mm-group-name"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p class="text-muted small">Check receivers to add them to this group.</p>
+        <input type="hidden" id="mm-group-id">
+        <div class="row g-2" id="mm-receiver-list">
+          {% for r in receivers %}
+          <div class="col-md-4 col-lg-3">
+            <label class="d-flex align-items-center gap-2 p-2 border rounded cursor-pointer mm-recv-row"
+                   data-receiver-id="{{ r.id }}">
+              <input type="checkbox" class="form-check-input mm-recv-check"
+                     data-receiver-id="{{ r.id }}" value="{{ r.id }}">
+              <span class="status-dot status-{{ r.status }}"></span>
+              <span class="text-truncate small">{{ r.hostname or r.ip_last_octet }}</span>
+              <small class="text-muted ms-auto">.{{ r.ip_last_octet }}</small>
+            </label>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" id="btn-save-members">Save Members</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+window.LEASH = window.LEASH || {};
+window.LEASH.sources = {{ sources | map(attribute='name') | list | tojson }};
+window.LEASH.allReceivers = {{ receivers | map(attribute='id') | list | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/groups.js') }}"></script>
+{% endblock %}

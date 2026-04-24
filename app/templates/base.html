@@ -27,6 +27,24 @@
           </a>
         </li>
         <li class="nav-item">
+          <a class="nav-link {% if request.endpoint == 'main.groups' %}active{% endif %}"
+             href="{{ url_for('main.groups') }}">
+            <i class="bi bi-tags me-1"></i>Groups
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link {% if 'layout' in (request.endpoint or '') %}active{% endif %}"
+             href="{{ url_for('main.layouts') }}">
+            <i class="bi bi-layout-three-columns me-1"></i>Layouts
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link {% if request.endpoint == 'main.snapshots' %}active{% endif %}"
+             href="{{ url_for('main.snapshots') }}">
+            <i class="bi bi-camera me-1"></i>Snapshots
+          </a>
+        </li>
+        <li class="nav-item">
           <a class="nav-link {% if request.endpoint == 'main.sources' %}active{% endif %}"
              href="{{ url_for('main.sources') }}">
             <i class="bi bi-collection-play me-1"></i>Sources
@@ -50,10 +68,10 @@
 
 <!-- Scan result modal -->
 <div class="modal fade" id="scanResultModal" tabindex="-1">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-lg">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title"><i class="bi bi-search me-2"></i>Scan Results</h5>
+        <h5 class="modal-title"><i class="bi bi-search me-2"></i>Network Scan Results</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body" id="scan-result-body">

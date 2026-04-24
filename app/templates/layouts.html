@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Layouts — Leash{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center mb-3 gap-3">
+  <h4 class="mb-0 text-light"><i class="bi bi-layout-three-columns me-2"></i>Layouts
+    <span class="badge bg-secondary ms-1">{{ layouts|length }}</span>
+  </h4>
+  <div class="ms-auto">
+    <button class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#createLayoutModal">
+      <i class="bi bi-plus-circle me-1"></i>New Layout
+    </button>
+  </div>
+</div>
+
+<p class="text-muted small mb-3">
+  Layouts let you arrange receiver cards on a spatial canvas matching your physical installation
+  — just like the QSYS panels.  Open a layout to control sources from the map view.
+</p>
+
+{% if not layouts %}
+<div class="alert alert-secondary text-center py-5">
+  <i class="bi bi-map display-4 d-block mb-2"></i>
+  No layouts yet. Create one to start building your floor plan.
+</div>
+{% else %}
+<div class="row g-3">
+  {% for layout in layouts %}
+  <div class="col-md-4 col-lg-3">
+    <div class="card h-100">
+      <div class="card-body text-center py-4"
+           style="background: {{ layout.bg_color }}; border-radius: 0.375rem 0.375rem 0 0; min-height:80px;">
+        <i class="bi bi-layout-three-columns display-6 text-white-50"></i>
+      </div>
+      <div class="card-footer">
+        <div class="d-flex align-items-center">
+          <div>
+            <strong>{{ layout.name }}</strong><br>
+            <small class="text-muted">{{ layout.receiver_count }} receivers</small>
+          </div>
+          <div class="ms-auto d-flex gap-1">
+            <a href="{{ url_for('main.layout_view', layout_id=layout.id) }}"
+               class="btn btn-xs btn-primary" title="Open layout">
+              <i class="bi bi-arrows-fullscreen"></i>
+            </a>
+            <button class="btn btn-xs btn-outline-danger btn-delete-layout"
+                    data-layout-id="{{ layout.id }}" data-layout-name="{{ layout.name }}">
+              <i class="bi bi-trash"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Create Layout Modal -->
+<div class="modal fade" id="createLayoutModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">New Layout</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">Name</label>
+          <input type="text" id="cl-name" class="form-control" placeholder="Lobby L2 NDI Routing">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Description <small class="text-muted">(optional)</small></label>
+          <input type="text" id="cl-desc" class="form-control">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Canvas background colour</label>
+          <input type="color" id="cl-bg" class="form-control form-control-color" value="#0a1628">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" id="btn-create-layout">Create &amp; Open</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.getElementById('btn-create-layout')?.addEventListener('click', async () => {
+  const name = document.getElementById('cl-name')?.value?.trim();
+  const desc = document.getElementById('cl-desc')?.value?.trim();
+  const bg   = document.getElementById('cl-bg')?.value;
+  if (!name) { window.Leash.toast('Name is required', 'warning'); return; }
+
+  const resp = await fetch('/api/layouts', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, description: desc, bg_color: bg }),
+  });
+  const data = await resp.json();
+  if (resp.ok) {
+    window.location.href = `/layouts/${data.id}`;
+  } else {
+    window.Leash.toast(data.error || 'Failed', 'danger');
+  }
+});
+
+document.querySelectorAll('.btn-delete-layout').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    if (!confirm(`Delete layout "${btn.dataset.layoutName}"?`)) return;
+    const resp = await fetch(`/api/layouts/${btn.dataset.layoutId}`, { method: 'DELETE' });
+    if (resp.ok) {
+      btn.closest('.col-md-4, .col-lg-3').remove();
+      window.Leash.toast('Layout deleted', 'warning');
+    }
+  });
+});
+</script>
+{% endblock %}

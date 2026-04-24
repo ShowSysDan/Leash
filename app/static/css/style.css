@@ -61,6 +61,135 @@
   color: #6c757d;
 }
 
+/* ── Layout canvas ── */
+.layout-canvas {
+  border-radius: 0.5rem;
+  border: 1px solid #333;
+}
+
+.layout-title {
+  position: absolute;
+  top: 1.5%;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #e0e8ff;
+  font-size: clamp(0.75rem, 2vw, 1.5rem);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-shadow: 0 0 12px rgba(100,150,255,0.6);
+  white-space: nowrap;
+  border-bottom: 1px solid rgba(100,150,255,0.4);
+  padding-bottom: 0.2em;
+  pointer-events: none;
+}
+
+/* Receiver card on canvas */
+.lc-card {
+  position: absolute;
+  background: rgba(10, 30, 70, 0.92);
+  border: 1px solid rgba(80, 140, 255, 0.5);
+  border-radius: 6px;
+  padding: 4px 6px;
+  width: clamp(120px, 16%, 180px);
+  cursor: default;
+  user-select: none;
+  backdrop-filter: blur(4px);
+}
+.lc-card:hover {
+  border-color: rgba(100, 180, 255, 0.9);
+}
+.lc-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 3px;
+}
+.lc-hostname {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #c8d8ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 75%;
+}
+.lc-index {
+  font-size: 0.65rem;
+  background: rgba(80,140,255,0.25);
+  border: 1px solid rgba(80,140,255,0.5);
+  border-radius: 3px;
+  padding: 0 4px;
+  color: #90b8ff;
+  flex-shrink: 0;
+}
+.lc-card-source .lc-source-select {
+  font-size: 0.65rem;
+  padding: 2px 4px;
+  height: auto;
+  background: rgba(5,15,40,0.9);
+  border-color: rgba(80,140,255,0.3);
+  color: #a0c0ff;
+  width: 100%;
+}
+.lc-remove-btn {
+  display: none;
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid #dc3545;
+  background: #1a0008;
+  color: #dc3545;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  cursor: pointer;
+  padding: 0;
+}
+.lc-card:hover .lc-remove-btn { display: block; }
+
+/* Edit mode */
+.layout-canvas.edit-mode .lc-card {
+  cursor: grab;
+  border-color: rgba(255, 200, 80, 0.7);
+}
+.layout-canvas.edit-mode .lc-card.dragging {
+  cursor: grabbing;
+  opacity: 0.8;
+  z-index: 100;
+  border-color: #ffc107;
+}
+.layout-canvas.edit-mode .lc-source-select {
+  pointer-events: none;
+}
+
+/* ── Groups ── */
+.group-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.color-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: transform 0.1s, border-color 0.1s;
+}
+.color-swatch:hover { transform: scale(1.15); }
+.color-swatch.selected {
+  border-color: #fff;
+  transform: scale(1.2);
+}
+
+.cursor-pointer { cursor: pointer; }
+
 /* Offline card — slightly dimmed */
 .receiver-card.border-danger {
   opacity: 0.8;

@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}Snapshots — Leash{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center mb-3 gap-3 flex-wrap">
+  <h4 class="mb-0 text-light"><i class="bi bi-camera me-2"></i>Snapshots
+    <span class="badge bg-secondary ms-1">{{ snapshots|length }}</span>
+  </h4>
+  <div class="ms-auto d-flex gap-2">
+    <button class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#captureModal">
+      <i class="bi bi-camera me-1"></i>Capture State
+    </button>
+  </div>
+</div>
+
+<p class="text-muted small mb-3">
+  A snapshot captures the current NDI source assignment for all (or selected) receivers.
+  Recalling a snapshot restores those assignments concurrently across all devices.
+</p>
+
+{% if not snapshots %}
+<div class="alert alert-secondary text-center py-5">
+  <i class="bi bi-camera display-4 d-block mb-2"></i>
+  No snapshots yet. Use <strong>Capture State</strong> to save the current routing.
+</div>
+{% else %}
+<div class="table-responsive">
+  <table class="table table-dark table-hover align-middle">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Description</th>
+        <th class="text-center">Receivers</th>
+        <th>Created</th>
+        <th class="text-end">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for snap in snapshots %}
+      <tr id="snap-row-{{ snap.id }}">
+        <td><strong>{{ snap.name }}</strong></td>
+        <td class="text-muted small">{{ snap.description or '—' }}</td>
+        <td class="text-center">
+          <span class="badge bg-secondary">{{ snap.entry_count }}</span>
+        </td>
+        <td><small class="text-muted">{{ snap.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+        <td class="text-end">
+          <div class="d-flex gap-1 justify-content-end">
+            <button class="btn btn-xs btn-outline-info btn-preview-snap"
+                    data-snap-id="{{ snap.id }}" data-snap-name="{{ snap.name }}"
+                    title="Preview entries">
+              <i class="bi bi-eye"></i>
+            </button>
+            <button class="btn btn-xs btn-success btn-recall-snap"
+                    data-snap-id="{{ snap.id }}" data-snap-name="{{ snap.name }}"
+                    title="Recall — apply to all devices">
+              <i class="bi bi-play-fill me-1"></i>Recall
+            </button>
+            <button class="btn btn-xs btn-outline-danger btn-delete-snap"
+                    data-snap-id="{{ snap.id }}" data-snap-name="{{ snap.name }}"
+                    title="Delete">
+              <i class="bi bi-trash"></i>
+            </button>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- Capture Modal -->
+<div class="modal fade" id="captureModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-camera me-2"></i>Capture Snapshot</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <label class="form-label">Snapshot Name</label>
+            <input type="text" id="cap-name" class="form-control"
+                   placeholder="e.g. Pre-show Routing">
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">Description <small class="text-muted">(optional)</small></label>
+            <input type="text" id="cap-desc" class="form-control"
+                   placeholder="Main show default routing">
+          </div>
+        </div>
+        <hr>
+        <div class="d-flex align-items-center mb-2">
+          <strong class="small">Receivers to include</strong>
+          <div class="ms-auto d-flex gap-2">
+            <button class="btn btn-xs btn-outline-secondary" id="cap-select-all">All</button>
+            <button class="btn btn-xs btn-outline-secondary" id="cap-select-none">None</button>
+            <button class="btn btn-xs btn-outline-secondary" id="cap-select-online">Online only</button>
+          </div>
+        </div>
+        <div class="row g-2" id="cap-receiver-list">
+          {% for r in receivers %}
+          <div class="col-md-4 col-lg-3">
+            <label class="d-flex align-items-center gap-2 p-2 border rounded cursor-pointer">
+              <input type="checkbox" class="form-check-input cap-recv-check"
+                     data-receiver-id="{{ r.id }}"
+                     data-status="{{ r.status }}"
+                     value="{{ r.id }}" checked>
+              <span class="status-dot status-{{ r.status }}"></span>
+              <div class="overflow-hidden">
+                <div class="text-truncate small">{{ r.hostname or r.ip_last_octet }}</div>
+                <div class="text-muted" style="font-size:0.7rem">{{ r.current_source or 'no source' }}</div>
+              </div>
+            </label>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-success" id="btn-capture">
+          <i class="bi bi-camera me-1"></i>Capture
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Preview / Recall Modal -->
+<div class="modal fade" id="previewSnapModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="preview-snap-title">Snapshot Preview</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="preview-snap-body">
+        <div class="loader-overlay"><span class="spinner-border"></span></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button class="btn btn-success" id="btn-recall-from-preview">
+          <i class="bi bi-play-fill me-1"></i>Recall All
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Recall Progress Modal -->
+<div class="modal fade" id="recallProgressModal" tabindex="-1" data-bs-backdrop="static">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-play-fill me-2"></i>Recalling Snapshot…</h5>
+      </div>
+      <div class="modal-body text-center py-4" id="recall-progress-body">
+        <div class="spinner-border text-success mb-3"></div>
+        <p class="text-muted">Applying sources to devices concurrently…</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+window.LEASH = window.LEASH || {};
+window.LEASH.receivers = {{ receivers | map(attribute='id') | list | tojson }};
+window.LEASH.receiverStatuses = {
+  {% for r in receivers %}"{{ r.id }}": "{{ r.status }}"{% if not loop.last %},{% endif %}{% endfor %}
+};
+</script>
+<script src="{{ url_for('static', filename='js/snapshots.js') }}"></script>
+{% endblock %}
