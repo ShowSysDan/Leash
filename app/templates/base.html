@@ -54,6 +54,12 @@
             <i class="bi bi-collection-play me-1"></i>Sources
           </a>
         </li>
+        <li class="nav-item">
+          <a class="nav-link {% if request.endpoint == 'main.schedules' %}active{% endif %}"
+             href="{{ url_for('main.schedules') }}">
+            <i class="bi bi-calendar-event me-1"></i>Schedules
+          </a>
+        </li>
       </ul>
       <div class="d-flex gap-2 flex-wrap">
         <button id="btn-scan" class="btn btn-sm btn-outline-primary" title="Scan subnet for BirdDog PLAY devices">

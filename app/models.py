@@ -211,6 +211,52 @@ class SnapshotEntry(db.Model):
         }
 
 
+# ── Scheduled Recalls ─────────────────────────────────────────────────────
+
+class ScheduledRecall(db.Model):
+    __tablename__ = "scheduled_recalls"
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+
+    # Null if the snapshot was deleted — schedule stays but is skipped until reassigned
+    snapshot_id = db.Column(db.Integer, db.ForeignKey("snapshots.id", ondelete="SET NULL"), nullable=True)
+
+    # Comma-separated weekday numbers: 0=Mon … 6=Sun  (e.g. "0,1,2,3,4" = Mon–Fri)
+    days_of_week = db.Column(db.String(20), nullable=False)
+    # "HH:MM" in local server time (24-hour)
+    time_of_day = db.Column(db.String(5), nullable=False)
+
+    enabled = db.Column(db.Boolean, default=True, nullable=False)
+    last_run = db.Column(db.DateTime)       # UTC timestamp of last execution
+    last_result = db.Column(db.String(255)) # human-readable outcome of last run
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    snapshot = db.relationship("Snapshot", lazy="joined")
+
+    DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+    def day_labels(self) -> list[str]:
+        return [self.DAY_NAMES[int(d)] for d in self.days_of_week.split(",") if d.strip().isdigit()]
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "snapshot_id": self.snapshot_id,
+            "snapshot_name": self.snapshot.name if self.snapshot else None,
+            "days_of_week": self.days_of_week,
+            "day_labels": self.day_labels(),
+            "time_of_day": self.time_of_day,
+            "enabled": self.enabled,
+            "last_run": self.last_run.isoformat() if self.last_run else None,
+            "last_result": self.last_result,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+
+
 # ── NDI Sources ───────────────────────────────────────────────────────────
 
 class NDISource(db.Model):

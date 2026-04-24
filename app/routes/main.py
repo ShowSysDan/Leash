@@ -1,5 +1,5 @@
-from flask import Blueprint, render_template
-from app.models import NDIReceiver, NDISource, ReceiverGroup, Layout, Snapshot
+from flask import Blueprint, current_app, render_template
+from app.models import NDIReceiver, NDISource, ReceiverGroup, Layout, Snapshot, ScheduledRecall
 from app import db
 
 main_bp = Blueprint("main", __name__)
@@ -60,3 +60,15 @@ def snapshots():
     all_snaps = Snapshot.query.order_by(Snapshot.created_at.desc()).all()
     all_receivers = NDIReceiver.query.order_by(NDIReceiver.index).all()
     return render_template("snapshots.html", snapshots=all_snaps, receivers=all_receivers)
+
+
+@main_bp.route("/schedules")
+def schedules():
+    all_schedules = ScheduledRecall.query.order_by(ScheduledRecall.time_of_day).all()
+    all_snapshots = Snapshot.query.order_by(Snapshot.name).all()
+    return render_template(
+        "schedules.html",
+        schedules=all_schedules,
+        snapshots=all_snapshots,
+        concurrency=current_app.config.get("RECALL_CONCURRENCY", 10),
+    )

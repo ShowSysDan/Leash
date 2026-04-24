@@ -1,5 +1,6 @@
 import logging
 import logging.handlers
+import os
 from pathlib import Path
 
 from flask import Flask
@@ -94,6 +95,7 @@ def create_app(config_name: str = "default") -> Flask:
     from app.routes.layouts_api import layouts_api_bp
     from app.routes.snapshots_api import snapshots_api_bp
     from app.routes.external_api import v1_bp
+    from app.routes.schedules_api import schedules_api_bp
 
     app.register_blueprint(main_bp)
     app.register_blueprint(api_bp, url_prefix="/api")
@@ -101,10 +103,17 @@ def create_app(config_name: str = "default") -> Flask:
     app.register_blueprint(layouts_api_bp, url_prefix="/api")
     app.register_blueprint(snapshots_api_bp, url_prefix="/api")
     app.register_blueprint(v1_bp, url_prefix="/api/v1")
+    app.register_blueprint(schedules_api_bp, url_prefix="/api")
 
     _configure_syslog(app)
 
     with app.app_context():
         _auto_migrate(app)
+
+    # Start the background scheduler — only in the real worker process, not
+    # Flask's reloader monitor parent (which never serves requests).
+    if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        from app.services.scheduler import init_scheduler
+        init_scheduler(app)
 
     return app

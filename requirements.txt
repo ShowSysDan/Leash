@@ -7,3 +7,4 @@ psycopg2-binary==2.9.9
 SQLAlchemy==2.0.30
 Werkzeug==3.0.3
 gunicorn==22.0.0
+APScheduler>=3.10,<4

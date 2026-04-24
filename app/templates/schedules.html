@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}Schedules — Leash NDI Source Control{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center mb-3 gap-3 flex-wrap">
+  <h4 class="mb-0 text-light">
+    <i class="bi bi-calendar-event me-2"></i>Schedules
+    <span class="badge bg-secondary ms-1">{{ schedules|length }}</span>
+  </h4>
+  <div class="ms-auto">
+    <button class="btn btn-sm btn-outline-success" id="btn-add-schedule">
+      <i class="bi bi-plus-circle me-1"></i>Add Schedule
+    </button>
+  </div>
+</div>
+
+<p class="text-muted small mb-3">
+  Schedules automatically recall a snapshot at a set time.
+  Times are in <strong>local server time</strong>.
+  Devices are contacted <strong>{{ concurrency }} at a time</strong> to avoid flooding the network —
+  all receivers in a snapshot will still be updated, just in batches.
+</p>
+
+{% if not schedules %}
+<div class="alert alert-secondary text-center py-5">
+  <i class="bi bi-calendar-x display-4 d-block mb-2"></i>
+  No schedules yet. Create one to automate snapshot recalls.
+</div>
+{% else %}
+<div class="table-responsive">
+  <table class="table table-dark table-hover align-middle">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Snapshot</th>
+        <th>Days</th>
+        <th>Time</th>
+        <th class="text-center">Status</th>
+        <th>Last Run</th>
+        <th class="text-end">Actions</th>
+      </tr>
+    </thead>
+    <tbody id="schedules-table-body">
+      {% for s in schedules %}
+      <tr id="sched-row-{{ s.id }}" class="{% if not s.enabled %}opacity-50{% endif %}">
+        <td><strong>{{ s.name }}</strong></td>
+        <td>
+          {% if s.snapshot %}
+            <span class="badge bg-dark border border-secondary">{{ s.snapshot.name }}</span>
+          {% else %}
+            <span class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>Snapshot deleted</span>
+          {% endif %}
+        </td>
+        <td>
+          <div class="d-flex gap-1 flex-wrap">
+            {% for day in s.day_labels() %}
+            <span class="badge bg-secondary">{{ day }}</span>
+            {% endfor %}
+          </div>
+        </td>
+        <td><span class="font-monospace">{{ s.time_of_day }}</span></td>
+        <td class="text-center">
+          <button class="btn btn-xs {% if s.enabled %}btn-success{% else %}btn-outline-secondary{% endif %} btn-toggle-sched"
+                  data-sched-id="{{ s.id }}" title="{{ 'Disable' if s.enabled else 'Enable' }}">
+            <i class="bi bi-{% if s.enabled %}check-circle-fill{% else %}pause-circle{% endif %}"></i>
+          </button>
+        </td>
+        <td>
+          {% if s.last_run %}
+          <small class="text-muted d-block">{{ s.last_run.strftime('%Y-%m-%d %H:%M') }}</small>
+          <small class="{% if s.last_result and 'ERROR' in s.last_result %}text-danger{% elif s.last_result and 'SKIP' in s.last_result %}text-warning{% else %}text-success{% endif %}">
+            {{ s.last_result or '' }}
+          </small>
+          {% else %}
+          <small class="text-muted">Never run</small>
+          {% endif %}
+        </td>
+        <td class="text-end">
+          <div class="d-flex gap-1 justify-content-end">
+            <button class="btn btn-xs btn-outline-secondary btn-edit-sched"
+                    data-sched-id="{{ s.id }}"
+                    data-name="{{ s.name }}"
+                    data-snapshot-id="{{ s.snapshot_id or '' }}"
+                    data-days="{{ s.days_of_week }}"
+                    data-time="{{ s.time_of_day }}"
+                    data-enabled="{{ 'true' if s.enabled else 'false' }}"
+                    title="Edit">
+              <i class="bi bi-pencil"></i>
+            </button>
+            <button class="btn btn-xs btn-outline-danger btn-delete-sched"
+                    data-sched-id="{{ s.id }}" data-sched-name="{{ s.name }}"
+                    title="Delete">
+              <i class="bi bi-trash"></i>
+            </button>
+          </div>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- Add / Edit Schedule Modal -->
+<div class="modal fade" id="scheduleModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="schedule-modal-title">Add Schedule</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="sched-edit-id">
+
+        <div class="mb-3">
+          <label class="form-label">Name</label>
+          <input type="text" id="sched-name" class="form-control" placeholder="Morning show routing">
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Snapshot to recall</label>
+          <select id="sched-snapshot" class="form-select">
+            <option value="">— select snapshot —</option>
+            {% for snap in snapshots %}
+            <option value="{{ snap.id }}">{{ snap.name }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Days of week</label>
+          <div class="d-flex gap-2 flex-wrap" id="day-checkboxes">
+            {% for n, label in [('0','Mon'),('1','Tue'),('2','Wed'),('3','Thu'),('4','Fri'),('5','Sat'),('6','Sun')] %}
+            <div class="form-check form-check-inline">
+              <input class="form-check-input day-check" type="checkbox" id="day-{{ n }}" value="{{ n }}">
+              <label class="form-check-label" for="day-{{ n }}">{{ label }}</label>
+            </div>
+            {% endfor %}
+          </div>
+          <div class="d-flex gap-2 mt-2">
+            <button type="button" class="btn btn-xs btn-outline-secondary" id="days-weekdays">Weekdays</button>
+            <button type="button" class="btn btn-xs btn-outline-secondary" id="days-all">Every day</button>
+            <button type="button" class="btn btn-xs btn-outline-secondary" id="days-none">None</button>
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Time <small class="text-muted">(local server time, 24-hour)</small></label>
+          <input type="time" id="sched-time" class="form-control" style="max-width:160px">
+        </div>
+
+        <div class="form-check form-switch">
+          <input class="form-check-input" type="checkbox" id="sched-enabled" checked>
+          <label class="form-check-label" for="sched-enabled">Enabled</label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" id="btn-save-schedule">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/schedules.js') }}"></script>
+{% endblock %}
