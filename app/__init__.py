@@ -105,6 +105,7 @@ def create_app(config_name: str = "default") -> Flask:
     from app.routes.snapshots_api import snapshots_api_bp
     from app.routes.external_api import v1_bp
     from app.routes.schedules_api import schedules_api_bp
+    from app.routes.settings_api import settings_api_bp
 
     app.register_blueprint(main_bp)
     app.register_blueprint(api_bp, url_prefix="/api")
@@ -113,6 +114,7 @@ def create_app(config_name: str = "default") -> Flask:
     app.register_blueprint(snapshots_api_bp, url_prefix="/api")
     app.register_blueprint(v1_bp, url_prefix="/api/v1")
     app.register_blueprint(schedules_api_bp, url_prefix="/api")
+    app.register_blueprint(settings_api_bp, url_prefix="/api")
 
     from app.__version__ import __version__
     app.config["LEASH_VERSION"] = __version__
@@ -121,6 +123,9 @@ def create_app(config_name: str = "default") -> Flask:
 
     with app.app_context():
         _auto_migrate(app)
+        # Load DB-persisted settings into app.config (seeds defaults on first boot).
+        from app.services.settings_service import load_into_app as _load_settings
+        _load_settings(app)
 
     # Start the background scheduler — only in the real worker process, not
     # Flask's reloader monitor parent (which never serves requests).

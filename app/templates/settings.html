@@ -1,0 +1,146 @@
+{% extends "base.html" %}
+{% block title %}Settings — Leash{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-8 col-xl-7">
+
+    <div class="d-flex align-items-center mb-4 gap-3">
+      <h2 class="mb-0"><i class="bi bi-gear me-2 text-secondary"></i>Settings</h2>
+      <span class="badge bg-secondary">Stored in database</span>
+    </div>
+
+    <div class="alert alert-info d-flex gap-2 mb-4" role="alert">
+      <i class="bi bi-info-circle-fill flex-shrink-0 mt-1"></i>
+      <div>
+        Settings are persisted in the database and applied immediately — no restart required.
+        On first startup, values are seeded from environment variables or built-in defaults.
+        <strong>DATABASE_URL</strong> and <strong>SECRET_KEY</strong> remain in your environment file.
+      </div>
+    </div>
+
+    <form id="settings-form" novalidate>
+      {% for group_name, settings in setting_groups.items() %}
+      <div class="card mb-4">
+        <div class="card-header d-flex align-items-center gap-2">
+          {% if group_name == "BirdDog Network" %}
+            <i class="bi bi-hdd-network text-primary"></i>
+          {% elif group_name == "Tractus MV" %}
+            <i class="bi bi-broadcast text-warning"></i>
+          {% elif group_name == "Polling" %}
+            <i class="bi bi-arrow-repeat text-info"></i>
+          {% elif group_name == "Recalls" %}
+            <i class="bi bi-lightning-charge text-success"></i>
+          {% elif group_name == "External API" %}
+            <i class="bi bi-key text-danger"></i>
+          {% else %}
+            <i class="bi bi-sliders"></i>
+          {% endif %}
+          <strong>{{ group_name }}</strong>
+        </div>
+        <div class="card-body">
+          {% for s in settings %}
+          <div class="mb-3">
+            <label class="form-label fw-semibold" for="field-{{ s.key }}">{{ s.label }}</label>
+            {% if s.sensitive %}
+            <input type="password"
+                   class="form-control font-monospace setting-input"
+                   id="field-{{ s.key }}"
+                   data-key="{{ s.key }}"
+                   data-sensitive="true"
+                   placeholder="{{ '(set — click to change)' if s.value == '***' else '(not set)' }}"
+                   autocomplete="off">
+            {% elif s.type == "int" %}
+            <input type="number"
+                   class="form-control font-monospace setting-input"
+                   id="field-{{ s.key }}"
+                   data-key="{{ s.key }}"
+                   value="{{ s.value }}"
+                   min="1">
+            {% else %}
+            <input type="text"
+                   class="form-control font-monospace setting-input"
+                   id="field-{{ s.key }}"
+                   data-key="{{ s.key }}"
+                   value="{{ s.value }}">
+            {% endif %}
+            {% if s.description %}
+            <div class="form-text text-secondary">{{ s.description }}</div>
+            {% endif %}
+          </div>
+          {% endfor %}
+          <div class="d-flex justify-content-end mt-2">
+            <button type="button" class="btn btn-sm btn-primary btn-save-group"
+                    data-group="{{ group_name }}">
+              <i class="bi bi-check2 me-1"></i>Save {{ group_name }}
+            </button>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </form>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+(function () {
+  'use strict';
+
+  document.querySelectorAll('.btn-save-group').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const groupName = btn.dataset.group;
+      const card = btn.closest('.card');
+      const inputs = card ? Array.from(card.querySelectorAll('.setting-input')) : [];
+      if (!inputs.length) return;
+
+      const payload = {};
+      for (const input of inputs) {
+        const key = input.dataset.key;
+        const val = input.value.trim();
+        // Skip sensitive fields left blank or unchanged (placeholder value)
+        if (input.dataset.sensitive === 'true' && (val === '' || val === '***')) continue;
+        payload[key] = val;
+      }
+
+      if (!Object.keys(payload).length) {
+        window.Leash.toast('No changes to save', 'info');
+        return;
+      }
+
+      btn.disabled = true;
+      try {
+        const resp = await fetch('/api/settings', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (!resp.ok) {
+          window.Leash.toast(data.error || 'Save failed', 'danger');
+          return;
+        }
+        if (data.errors && data.errors.length) {
+          window.Leash.toast('Some errors: ' + data.errors.join('; '), 'warning');
+        } else {
+          window.Leash.toast(groupName + ' saved', 'success');
+        }
+        // Clear sensitive inputs after save so they don't linger in the DOM
+        inputs.forEach(input => {
+          if (input.dataset.sensitive === 'true' && input.value.trim()) {
+            input.value = '';
+            input.placeholder = '(set — click to change)';
+          }
+        });
+      } catch (_err) {
+        window.Leash.toast('Network error', 'danger');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}
