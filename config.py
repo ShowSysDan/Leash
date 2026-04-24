@@ -12,7 +12,6 @@ class Config:
     NDI_SUBNET_PREFIX = os.environ.get("NDI_SUBNET_PREFIX", "10.1.248.")
     NDI_DEVICE_PORT = int(os.environ.get("NDI_DEVICE_PORT", 8080))
     NDI_DEVICE_PASSWORD = os.environ.get("NDI_DEVICE_PASSWORD", "birddog")
-    NDI_MAX_RECEIVERS = int(os.environ.get("NDI_MAX_RECEIVERS", 83))
 
     # Async request timeout (seconds)
     HTTP_TIMEOUT = int(os.environ.get("HTTP_TIMEOUT", 5))
