@@ -2,10 +2,50 @@
 (function () {
   'use strict';
 
-  const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const modal     = new bootstrap.Modal(document.getElementById('scheduleModal'));
+  const modal = new bootstrap.Modal(document.getElementById('scheduleModal'));
+
+  // ── enforcement countdown (updates every 30s) ──────────────────────────────
+
+  function updateCountdowns() {
+    document.querySelectorAll('.enforcement-badge[data-enforcing-until]').forEach(badge => {
+      const until = new Date(badge.dataset.enforcingUntil + 'Z');  // treat as UTC
+      const remaining = Math.max(0, Math.round((until - Date.now()) / 60000));
+      if (remaining <= 0) {
+        badge.textContent = 'Expiring…';
+        setTimeout(() => location.reload(), 5000);
+      } else {
+        badge.innerHTML = `<i class="bi bi-shield-check me-1"></i>${remaining} min left`;
+      }
+    });
+  }
+  updateCountdowns();
+  setInterval(updateCountdowns, 30000);
+
+  // ── persist options toggle ─────────────────────────────────────────────────
+
+  document.getElementById('sched-persistent')?.addEventListener('change', function () {
+    document.getElementById('persist-options').style.display = this.checked ? '' : 'none';
+  });
 
   // ── helpers ────────────────────────────────────────────────────────────────
+
+  function enforcementCell(s) {
+    if (!s.persistent) return '<span class="text-muted small">—</span>';
+
+    if (s.is_enforcing && s.enforcing_until) {
+      const until = new Date(s.enforcing_until + 'Z');
+      const mins  = Math.max(0, Math.round((until - Date.now()) / 60000));
+      return `
+        <span class="badge bg-success enforcement-badge" data-enforcing-until="${s.enforcing_until}">
+          <i class="bi bi-shield-check me-1"></i>${mins} min left
+        </span>
+        <button class="btn btn-xs btn-outline-warning ms-1 btn-stop-enforcement"
+                data-sched-id="${s.id}" title="Stop enforcement now">
+          <i class="bi bi-stop-circle"></i>
+        </button>`;
+    }
+    return `<span class="text-muted small"><i class="bi bi-shield me-1"></i>${s.persist_minutes} min window</span>`;
+  }
 
   function renderRow(s) {
     const row = document.getElementById(`sched-row-${s.id}`);
@@ -15,7 +55,7 @@
       `<span class="badge bg-secondary">${d}</span>`
     ).join(' ');
 
-    const lastRun = s.last_run
+    const lastRunStr = s.last_run
       ? new Date(s.last_run + 'Z').toLocaleString()
       : 'Never run';
 
@@ -28,9 +68,9 @@
 
     const snapBadge = s.snapshot_name
       ? `<span class="badge bg-dark border border-secondary">${s.snapshot_name}</span>`
-      : `<span class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>Snapshot deleted</span>`;
+      : `<span class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>Deleted</span>`;
 
-    const enabledCls = s.enabled ? 'btn-success' : 'btn-outline-secondary';
+    const enabledCls  = s.enabled ? 'btn-success' : 'btn-outline-secondary';
     const enabledIcon = s.enabled ? 'check-circle-fill' : 'pause-circle';
 
     row.className = s.enabled ? '' : 'opacity-50';
@@ -45,8 +85,9 @@
           <i class="bi bi-${enabledIcon}"></i>
         </button>
       </td>
+      <td>${enforcementCell(s)}</td>
       <td>
-        <small class="text-muted d-block">${lastRun}</small>
+        <small class="text-muted d-block">${lastRunStr}</small>
         <small class="${resultClass}">${s.last_result || ''}</small>
       </td>
       <td class="text-end">
@@ -58,6 +99,8 @@
                   data-days="${s.days_of_week}"
                   data-time="${s.time_of_day}"
                   data-enabled="${s.enabled}"
+                  data-persistent="${s.persistent}"
+                  data-persist-minutes="${s.persist_minutes}"
                   title="Edit"><i class="bi bi-pencil"></i></button>
           <button class="btn btn-xs btn-outline-danger btn-delete-sched"
                   data-sched-id="${s.id}" data-sched-name="${s.name}"
@@ -65,9 +108,11 @@
         </div>
       </td>`;
     bindRowActions(row);
+    updateCountdowns();
   }
 
   function appendRow(s) {
+    // If this is the first schedule, reload to show the table instead of the empty state
     const tbody = document.getElementById('schedules-table-body');
     if (!tbody) { location.reload(); return; }
     const tr = document.createElement('tr');
@@ -85,6 +130,9 @@
     document.getElementById('sched-snapshot').value = '';
     document.getElementById('sched-time').value = '';
     document.getElementById('sched-enabled').checked = true;
+    document.getElementById('sched-persistent').checked = false;
+    document.getElementById('sched-persist-minutes').value = '60';
+    document.getElementById('persist-options').style.display = 'none';
     document.querySelectorAll('.day-check').forEach(cb => { cb.checked = false; });
   }
 
@@ -97,6 +145,11 @@
     document.getElementById('sched-time').value = btn.dataset.time;
     document.getElementById('sched-enabled').checked = btn.dataset.enabled === 'true';
 
+    const persistent = btn.dataset.persistent === 'true';
+    document.getElementById('sched-persistent').checked = persistent;
+    document.getElementById('sched-persist-minutes').value = btn.dataset.persistMinutes || '60';
+    document.getElementById('persist-options').style.display = persistent ? '' : 'none';
+
     const days = btn.dataset.days.split(',');
     document.querySelectorAll('.day-check').forEach(cb => {
       cb.checked = days.includes(cb.value);
@@ -107,17 +160,19 @@
   // ── save (create or update) ────────────────────────────────────────────────
 
   document.getElementById('btn-save-schedule')?.addEventListener('click', async () => {
-    const editId = document.getElementById('sched-edit-id').value;
-    const name = document.getElementById('sched-name').value.trim();
-    const snapId = document.getElementById('sched-snapshot').value;
-    const time = document.getElementById('sched-time').value;
-    const enabled = document.getElementById('sched-enabled').checked;
-    const days = [...document.querySelectorAll('.day-check:checked')].map(cb => cb.value);
+    const editId        = document.getElementById('sched-edit-id').value;
+    const name          = document.getElementById('sched-name').value.trim();
+    const snapId        = document.getElementById('sched-snapshot').value;
+    const time          = document.getElementById('sched-time').value;
+    const enabled       = document.getElementById('sched-enabled').checked;
+    const persistent    = document.getElementById('sched-persistent').checked;
+    const persistMins   = parseInt(document.getElementById('sched-persist-minutes').value) || 60;
+    const days          = [...document.querySelectorAll('.day-check:checked')].map(cb => cb.value);
 
-    if (!name)          { window.Leash.toast('Name is required', 'warning'); return; }
-    if (!snapId)        { window.Leash.toast('Select a snapshot', 'warning'); return; }
-    if (!time)          { window.Leash.toast('Set a time', 'warning'); return; }
-    if (!days.length)   { window.Leash.toast('Select at least one day', 'warning'); return; }
+    if (!name)        { window.Leash.toast('Name is required', 'warning'); return; }
+    if (!snapId)      { window.Leash.toast('Select a snapshot', 'warning'); return; }
+    if (!time)        { window.Leash.toast('Set a time', 'warning'); return; }
+    if (!days.length) { window.Leash.toast('Select at least one day', 'warning'); return; }
 
     const body = {
       name,
@@ -125,6 +180,8 @@
       days_of_week: days.join(','),
       time_of_day: time,
       enabled,
+      persistent,
+      persist_minutes: persistMins,
     };
 
     const url    = editId ? `/api/schedules/${editId}` : '/api/schedules';
@@ -173,11 +230,11 @@
     document.querySelectorAll('.day-check').forEach(cb => { cb.checked = false; });
   });
 
-  // ── row-level actions (toggle, edit, delete) ───────────────────────────────
+  // ── row-level actions ──────────────────────────────────────────────────────
 
   function bindRowActions(root) {
     root.querySelector('.btn-toggle-sched')?.addEventListener('click', async function () {
-      const id = this.dataset.schedId;
+      const id   = this.dataset.schedId;
       const resp = await fetch(`/api/schedules/${id}/toggle`, { method: 'PATCH' });
       const data = await resp.json();
       if (resp.ok) {
@@ -198,6 +255,16 @@
       if (resp.ok) {
         document.getElementById(`sched-row-${id}`)?.remove();
         window.Leash.toast('Schedule deleted', 'warning');
+      }
+    });
+
+    root.querySelector('.btn-stop-enforcement')?.addEventListener('click', async function () {
+      const id   = this.dataset.schedId;
+      const resp = await fetch(`/api/schedules/${id}/enforcement`, { method: 'DELETE' });
+      const data = await resp.json();
+      if (resp.ok) {
+        renderRow(data);
+        window.Leash.toast('Enforcement stopped', 'warning');
       }
     });
   }

@@ -65,12 +65,19 @@ def _validate_body(body: dict):
     if not (0 <= h <= 23 and 0 <= m <= 59):
         return None, "time_of_day out of range"
 
+    persistent = bool(body.get("persistent", False))
+    persist_minutes = int(body.get("persist_minutes", 60))
+    if persist_minutes < 1 or persist_minutes > 1440:
+        return None, "persist_minutes must be between 1 and 1440"
+
     return {
         "name": name,
         "snapshot_id": int(snap_id),
         "days_of_week": days_str,
         "time_of_day": time_str,
         "enabled": bool(body.get("enabled", True)),
+        "persistent": persistent,
+        "persist_minutes": persist_minutes,
     }, None
 
 
@@ -132,4 +139,14 @@ def toggle_schedule(sched_id: int):
     sched.updated_at = datetime.utcnow()
     db.session.commit()
     _reload()
+    return jsonify(sched.to_dict())
+
+
+@schedules_api_bp.route("/schedules/<int:sched_id>/enforcement", methods=["DELETE"])
+def stop_enforcement(sched_id: int):
+    """Manually end an active enforcement window early."""
+    sched = ScheduledRecall.query.get_or_404(sched_id)
+    sched.enforcing_until = None
+    sched.updated_at = datetime.utcnow()
+    db.session.commit()
     return jsonify(sched.to_dict())

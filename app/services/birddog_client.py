@@ -356,6 +356,36 @@ def run_async(coro):
         return asyncio.run(coro)
 
 
+async def bulk_fetch_source(receivers: list, config: dict) -> list[dict]:
+    """Lightweight poll: fetch ONLY the current NDI source from each receiver.
+
+    Uses one HTTP call per device instead of the three required by bulk_fetch_status,
+    making it suitable for frequent enforcement checks.
+    Returns list of {"id", "online", "current_source"} dicts.
+    """
+    prefix = config.get("NDI_SUBNET_PREFIX", "10.1.248.")
+    port = config.get("NDI_DEVICE_PORT", 8080)
+    password = config.get("NDI_DEVICE_PASSWORD", "birddog")
+    timeout = config.get("HTTP_TIMEOUT", 5)
+    concurrency = config.get("RECALL_CONCURRENCY", 10)
+    sem = asyncio.Semaphore(concurrency)
+
+    async def _one(recv):
+        async with sem:
+            ip = f"{prefix}{recv['ip_last_octet']}"
+            client = BirdDogClient(ip, port=port, password=password, timeout=timeout)
+            code, data = await client.get_connect_to()
+            online = code == 200
+            current = None
+            if online and isinstance(data, dict):
+                raw = data.get("sourceName", "")
+                current = raw.strip() if raw else None
+            return {"id": recv["id"], "online": online, "current_source": current}
+
+    tasks = [asyncio.create_task(_one(r)) for r in receivers]
+    return await asyncio.gather(*tasks, return_exceptions=False)
+
+
 async def bulk_fetch_status(receivers: list, config: dict) -> list[dict]:
     """Concurrently fetch status for a list of receiver dicts."""
     prefix = config.get("NDI_SUBNET_PREFIX", "10.1.248.")

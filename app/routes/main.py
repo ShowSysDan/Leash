@@ -71,4 +71,5 @@ def schedules():
         schedules=all_schedules,
         snapshots=all_snapshots,
         concurrency=current_app.config.get("RECALL_CONCURRENCY", 10),
+        enforcement_interval=current_app.config.get("ENFORCEMENT_INTERVAL", 60),
     )

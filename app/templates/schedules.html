@@ -15,10 +15,11 @@
 </div>
 
 <p class="text-muted small mb-3">
-  Schedules automatically recall a snapshot at a set time.
-  Times are in <strong>local server time</strong>.
-  Devices are contacted <strong>{{ concurrency }} at a time</strong> to avoid flooding the network —
-  all receivers in a snapshot will still be updated, just in batches.
+  Schedules automatically recall a snapshot at a set time (local server time).
+  Enable <strong>Persistent</strong> to keep receivers locked to the snapshot for a set window —
+  Leash will poll every {{ enforcement_interval }}s and correct any source drift, including
+  receivers that were offline when the schedule fired.
+  Receivers are contacted <strong>{{ concurrency }} at a time</strong>.
 </p>
 
 {% if not schedules %}
@@ -35,20 +36,22 @@
         <th>Snapshot</th>
         <th>Days</th>
         <th>Time</th>
-        <th class="text-center">Status</th>
+        <th class="text-center">On/Off</th>
+        <th>Enforcement</th>
         <th>Last Run</th>
         <th class="text-end">Actions</th>
       </tr>
     </thead>
     <tbody id="schedules-table-body">
       {% for s in schedules %}
+      {% set mins_left = s.enforcement_minutes_remaining() %}
       <tr id="sched-row-{{ s.id }}" class="{% if not s.enabled %}opacity-50{% endif %}">
         <td><strong>{{ s.name }}</strong></td>
         <td>
           {% if s.snapshot %}
             <span class="badge bg-dark border border-secondary">{{ s.snapshot.name }}</span>
           {% else %}
-            <span class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>Snapshot deleted</span>
+            <span class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>Deleted</span>
           {% endif %}
         </td>
         <td>
@@ -64,6 +67,21 @@
                   data-sched-id="{{ s.id }}" title="{{ 'Disable' if s.enabled else 'Enable' }}">
             <i class="bi bi-{% if s.enabled %}check-circle-fill{% else %}pause-circle{% endif %}"></i>
           </button>
+        </td>
+        <td>
+          {% if not s.persistent %}
+            <span class="text-muted small">—</span>
+          {% elif mins_left is not none %}
+            <span class="badge bg-success enforcement-badge" data-enforcing-until="{{ s.enforcing_until.isoformat() }}">
+              <i class="bi bi-shield-check me-1"></i>{{ mins_left }} min left
+            </span>
+            <button class="btn btn-xs btn-outline-warning ms-1 btn-stop-enforcement"
+                    data-sched-id="{{ s.id }}" title="Stop enforcement now">
+              <i class="bi bi-stop-circle"></i>
+            </button>
+          {% else %}
+            <span class="text-muted small"><i class="bi bi-shield me-1"></i>{{ s.persist_minutes }} min window</span>
+          {% endif %}
         </td>
         <td>
           {% if s.last_run %}
@@ -84,6 +102,8 @@
                     data-days="{{ s.days_of_week }}"
                     data-time="{{ s.time_of_day }}"
                     data-enabled="{{ 'true' if s.enabled else 'false' }}"
+                    data-persistent="{{ 'true' if s.persistent else 'false' }}"
+                    data-persist-minutes="{{ s.persist_minutes }}"
                     title="Edit">
               <i class="bi bi-pencil"></i>
             </button>
@@ -147,6 +167,27 @@
         <div class="mb-3">
           <label class="form-label">Time <small class="text-muted">(local server time, 24-hour)</small></label>
           <input type="time" id="sched-time" class="form-control" style="max-width:160px">
+        </div>
+
+        <hr>
+
+        <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" id="sched-persistent">
+          <label class="form-check-label fw-semibold" for="sched-persistent">
+            Persistent enforcement
+          </label>
+        </div>
+        <div id="persist-options" style="display:none" class="ms-2 mb-3">
+          <p class="text-muted small mb-2">
+            After firing, Leash polls receivers every {{ enforcement_interval }}s and corrects any source drift —
+            including devices that were offline and come back online during the window.
+          </p>
+          <div class="d-flex align-items-center gap-2">
+            <label class="form-label mb-0 text-nowrap">Enforce for</label>
+            <input type="number" id="sched-persist-minutes" class="form-control form-control-sm"
+                   min="1" max="1440" value="60" style="width:80px">
+            <span class="text-muted small">minutes</span>
+          </div>
         </div>
 
         <div class="form-check form-switch">
