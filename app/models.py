@@ -217,15 +217,26 @@ class NDISource(db.Model):
     __tablename__ = "ndi_sources"
 
     id = db.Column(db.Integer, primary_key=True)
+    # Stable 1-based index — assigned once, never reused or reassigned.
+    # Survives the source going offline. External systems can address by this number.
+    source_index = db.Column(db.Integer, unique=True)
     name = db.Column(db.String(255), unique=True, nullable=False)
+    # True = seen on the network during last discovery run
     discovered = db.Column(db.Boolean, default=False)
     last_seen = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    @classmethod
+    def next_index(cls) -> int:
+        """Return the next available stable source index."""
+        max_idx = db.session.query(db.func.max(cls.source_index)).scalar() or 0
+        return max_idx + 1
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "source_index": self.source_index,
             "name": self.name,
-            "discovered": self.discovered,
+            "online": self.discovered,
             "last_seen": self.last_seen.isoformat() if self.last_seen else None,
         }

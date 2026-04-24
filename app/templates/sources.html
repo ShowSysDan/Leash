@@ -15,11 +15,11 @@
 </div>
 
 <p class="text-muted small">
-  Sources are cached in the database so they remain available even when devices
-  are offline.  Run <strong>Discover</strong> to refresh the list from a live
-  BirdDog decoder.  Previously seen sources are kept with
-  <span class="badge bg-secondary">cached</span> status until they are
-  rediscovered or manually deleted.
+  Sources are cached with a <strong>stable index (#)</strong> that never changes —
+  even when a source goes offline.  External systems (QSYS, etc.) can address sources
+  by number via <code>POST /api/v1/route</code>.
+  Run <strong>Discover from Network</strong> to refresh live status.
+  Offline sources are kept in the registry; only live sources appear in receiver dropdowns.
 </p>
 
 {% if not sources %}
@@ -32,6 +32,7 @@
   <table class="table table-dark table-hover table-sm align-middle">
     <thead>
       <tr>
+        <th class="text-center" style="width:60px">#</th>
         <th>Name</th>
         <th class="text-center">Status</th>
         <th>Last Seen</th>
@@ -41,12 +42,17 @@
     <tbody id="sources-table-body">
       {% for s in sources %}
       <tr id="src-row-{{ s.id }}">
+        <td class="text-center">
+          <span class="badge bg-dark border border-secondary font-monospace">
+            {{ s.source_index or '?' }}
+          </span>
+        </td>
         <td class="text-break">{{ s.name }}</td>
         <td class="text-center">
           {% if s.discovered %}
           <span class="badge bg-success">live</span>
           {% else %}
-          <span class="badge bg-secondary">cached</span>
+          <span class="badge bg-secondary">offline</span>
           {% endif %}
         </td>
         <td>

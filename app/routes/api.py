@@ -450,12 +450,23 @@ def discover_sources():
         if existing:
             existing.discovered = True
             existing.last_seen = now
+            # Back-fill source_index for rows created before this field existed
+            if existing.source_index is None:
+                existing.source_index = NDISource.next_index()
+                db.session.flush()
             updated.append(clean)
         else:
-            db.session.add(NDISource(name=clean, discovered=True, last_seen=now))
+            new_src = NDISource(
+                name=clean,
+                discovered=True,
+                last_seen=now,
+                source_index=NDISource.next_index(),
+            )
+            db.session.add(new_src)
+            db.session.flush()   # make source_index available immediately for next_index()
             added.append(clean)
 
-    # Mark previously-discovered sources that are no longer visible as stale
+    # Mark previously-discovered sources that are no longer visible as offline
     seen_names = {n.strip() for n in data if n.strip() and n.strip() != "None"}
     NDISource.query.filter(
         NDISource.discovered == True,
@@ -464,7 +475,7 @@ def discover_sources():
 
     db.session.commit()
 
-    all_sources = NDISource.query.order_by(NDISource.name).all()
+    all_sources = NDISource.query.order_by(NDISource.source_index).all()
     return jsonify({
         "added": added,
         "updated": updated,

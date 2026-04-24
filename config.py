@@ -17,6 +17,9 @@ class Config:
     # Async request timeout (seconds)
     HTTP_TIMEOUT = int(os.environ.get("HTTP_TIMEOUT", 5))
 
+    # External API key — leave unset to disable auth (open network only)
+    API_KEY = os.environ.get("API_KEY") or None
+
 
 class DevelopmentConfig(Config):
     DEBUG = True

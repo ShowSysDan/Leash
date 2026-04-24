@@ -24,11 +24,13 @@ def create_app(config_name: str = "default") -> Flask:
     from app.routes.groups_api import groups_api_bp
     from app.routes.layouts_api import layouts_api_bp
     from app.routes.snapshots_api import snapshots_api_bp
+    from app.routes.external_api import v1_bp
 
     app.register_blueprint(main_bp)
     app.register_blueprint(api_bp, url_prefix="/api")
     app.register_blueprint(groups_api_bp, url_prefix="/api")
     app.register_blueprint(layouts_api_bp, url_prefix="/api")
     app.register_blueprint(snapshots_api_bp, url_prefix="/api")
+    app.register_blueprint(v1_bp, url_prefix="/api/v1")
 
     return app
