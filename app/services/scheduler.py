@@ -63,8 +63,13 @@ def init_scheduler(app) -> BackgroundScheduler:
     _scheduler.start()
     logger.info("Leash scheduler: started (pid=%d, enforcement_interval=%ds)", os.getpid(), interval)
 
+    # atexit runs during graceful shutdown (gunicorn's default on SIGTERM),
+    # which is enough for a clean scheduler stop.  A SIGKILL will cut the
+    # process off before atexit runs, but at that point the scheduler is
+    # going away regardless.  Deliberately NOT overriding SIGTERM — that
+    # would conflict with gunicorn's own graceful-shutdown handler.
     import atexit
-    atexit.register(lambda: _scheduler.shutdown(wait=False))
+    atexit.register(lambda: _scheduler.shutdown(wait=False) if _scheduler else None)
 
     return _scheduler
 
@@ -112,7 +117,7 @@ def _do_recall(app, schedule_id: int) -> None:
     from app import db
     from app.models import NDIReceiver, ScheduledRecall
     from app.services.audit_log import device_error, snapshot_recalled, snapshot_source_changed
-    from app.services.birddog_client import BirdDogClient, run_async
+    from app.services.birddog_client import client_from_receiver, run_async
 
     with app.app_context():
         sched = db.session.get(ScheduledRecall, schedule_id)
@@ -142,12 +147,7 @@ def _do_recall(app, schedule_id: int) -> None:
             async def _one(entry):
                 async with sem:
                     recv = entry.receiver
-                    client = BirdDogClient(
-                        ip=recv.ip_address,
-                        port=cfg["NDI_DEVICE_PORT"],
-                        password=cfg["NDI_DEVICE_PASSWORD"],
-                        timeout=cfg["HTTP_TIMEOUT"],
-                    )
+                    client = client_from_receiver(recv, cfg)
                     code, _ = await client.set_connect_to(entry.source_name)
                     return {
                         "receiver_id": recv.id,
@@ -179,7 +179,7 @@ def _do_recall(app, schedule_id: int) -> None:
             recv.current_source = ok_map[recv.id]
             recv.updated_at = now
             snapshot_source_changed(
-                recv.label or recv.hostname or recv.ip_last_octet,
+                recv.display_name,
                 recv.ip_address, old_source, ok_map[recv.id], snap.name,
             )
         for r in failed:
@@ -221,7 +221,12 @@ def _enforce_persistent(app) -> None:
         from app import db
         from app.models import NDIReceiver, ScheduledRecall
         from app.services.audit_log import source_changed
-        from app.services.birddog_client import BirdDogClient, bulk_fetch_source, run_async
+        from app.services.birddog_client import (
+            bulk_fetch_source,
+            client_config,
+            client_from_receiver,
+            run_async,
+        )
 
         now = datetime.utcnow()
         active = ScheduledRecall.query.filter(
@@ -254,18 +259,11 @@ def _enforce_persistent(app) -> None:
         recv_by_id = {r.id: r for r in receivers}
 
         cfg = app.config
-        cfg_dict = {
-            "NDI_SUBNET_PREFIX": cfg["NDI_SUBNET_PREFIX"],
-            "NDI_DEVICE_PORT": cfg["NDI_DEVICE_PORT"],
-            "NDI_DEVICE_PASSWORD": cfg["NDI_DEVICE_PASSWORD"],
-            "HTTP_TIMEOUT": cfg["HTTP_TIMEOUT"],
-            "RECALL_CONCURRENCY": cfg.get("RECALL_CONCURRENCY", 10),
-        }
         recv_dicts = [{"id": r.id, "ip_last_octet": r.ip_last_octet} for r in receivers]
 
         # Lightweight poll — one /connectTo call per device
         try:
-            poll_results = run_async(bulk_fetch_source(recv_dicts, cfg_dict))
+            poll_results = run_async(bulk_fetch_source(recv_dicts, client_config(cfg)))
         except Exception:
             logger.exception("Enforcement: source poll failed")
             return
@@ -311,12 +309,7 @@ def _enforce_persistent(app) -> None:
 
             async def _one(recv, expected):
                 async with sem:
-                    client = BirdDogClient(
-                        ip=recv.ip_address,
-                        port=cfg["NDI_DEVICE_PORT"],
-                        password=cfg["NDI_DEVICE_PASSWORD"],
-                        timeout=cfg["HTTP_TIMEOUT"],
-                    )
+                    client = client_from_receiver(recv, cfg)
                     code, _ = await client.set_connect_to(expected)
                     return {"receiver_id": recv.id, "ok": code == 200, "expected": expected}
 
@@ -340,7 +333,7 @@ def _enforce_persistent(app) -> None:
                 recv.current_source = c["expected"]
                 recv.updated_at = commit_now
                 source_changed(
-                    recv.label or recv.hostname or recv.ip_last_octet,
+                    recv.display_name,
                     recv.ip_address, old_source, c["expected"], via="enforcement",
                 )
                 ok_count += 1

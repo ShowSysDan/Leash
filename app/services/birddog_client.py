@@ -25,6 +25,21 @@ LEGACY_PATH_MAP = {
 
 
 class BirdDogClient:
+    """
+    Async BirdDog REST client.
+
+    Session reuse:
+      The client can operate in two modes.  If an aiohttp.ClientSession is
+      passed in (via the `session` kwarg or by entering the client as a
+      context manager), all requests use that session — the efficient path
+      for bulk operations.  Otherwise each call creates a short-lived
+      session, fine for one-shot Flask-route usage.
+
+      Bulk helpers (bulk_fetch_status, bulk_fetch_source, scan_subnet)
+      create ONE ClientSession and share it across every receiver they
+      contact, replacing what used to be N * M sessions per operation.
+    """
+
     def __init__(
         self,
         ip: str,
@@ -32,6 +47,7 @@ class BirdDogClient:
         password: str = "birddog",
         timeout: int = 5,
         legacy_paths: bool = False,
+        session: aiohttp.ClientSession | None = None,
     ):
         self.ip = ip
         self.port = port
@@ -39,6 +55,20 @@ class BirdDogClient:
         self.timeout = aiohttp.ClientTimeout(total=timeout)
         self.base_url = f"http://{ip}:{port}"
         self.legacy_paths = legacy_paths
+        self._session = session
+        self._owns_session = False  # True only when __aenter__ creates one
+
+    async def __aenter__(self):
+        if self._session is None:
+            self._session = aiohttp.ClientSession(timeout=self.timeout)
+            self._owns_session = True
+        return self
+
+    async def __aexit__(self, *exc_info):
+        if self._owns_session and self._session is not None:
+            await self._session.close()
+            self._session = None
+            self._owns_session = False
 
     def _path(self, endpoint: str) -> str:
         if self.legacy_paths and endpoint in LEGACY_PATH_MAP:
@@ -52,42 +82,37 @@ class BirdDogClient:
             "User-Agent": "Leash/1.0",
         }
 
-    async def _get(self, endpoint: str) -> tuple[int, Any]:
+    async def _request(self, method: str, endpoint: str, **kwargs) -> tuple[int, Any]:
+        """Single code path for GET and POST — uses the shared session if set,
+        else spins up a short-lived one."""
         url = f"{self.base_url}{self._path(endpoint)}"
         try:
+            if self._session is not None:
+                async with self._session.request(method, url, **kwargs) as resp:
+                    text = await resp.text()
+                    return resp.status, _try_json(text)
             async with aiohttp.ClientSession(timeout=self.timeout) as session:
-                async with session.get(url, headers=self._headers()) as resp:
+                async with session.request(method, url, **kwargs) as resp:
                     text = await resp.text()
                     return resp.status, _try_json(text)
         except asyncio.TimeoutError:
-            logger.warning("Timeout GET %s", url)
+            logger.warning("Timeout %s %s", method, url)
             return 0, "timeout"
         except aiohttp.ClientError as exc:
-            logger.warning("Error GET %s: %s", url, exc)
+            logger.warning("Error %s %s: %s", method, url, exc)
             return 0, str(exc)
 
+    async def _get(self, endpoint: str) -> tuple[int, Any]:
+        return await self._request("GET", endpoint, headers=self._headers())
+
     async def _post(self, endpoint: str, data: Any = None, raw_text: bool = False) -> tuple[int, Any]:
-        url = f"{self.base_url}{self._path(endpoint)}"
-        try:
-            async with aiohttp.ClientSession(timeout=self.timeout) as session:
-                if raw_text:
-                    async with session.post(
-                        url,
-                        data=str(data) if data is not None else "",
-                        headers={**self._headers(), "Content-Type": "text/plain"},
-                    ) as resp:
-                        text = await resp.text()
-                        return resp.status, _try_json(text)
-                else:
-                    async with session.post(url, json=data, headers=self._headers()) as resp:
-                        text = await resp.text()
-                        return resp.status, _try_json(text)
-        except asyncio.TimeoutError:
-            logger.warning("Timeout POST %s", url)
-            return 0, "timeout"
-        except aiohttp.ClientError as exc:
-            logger.warning("Error POST %s: %s", url, exc)
-            return 0, str(exc)
+        if raw_text:
+            return await self._request(
+                "POST", endpoint,
+                data=str(data) if data is not None else "",
+                headers={**self._headers(), "Content-Type": "text/plain"},
+            )
+        return await self._request("POST", endpoint, json=data, headers=self._headers())
 
     # -------------------------------------------------------------------------
     # BasicDeviceInfo
@@ -172,9 +197,6 @@ class BirdDogClient:
     async def get_decode_status(self) -> tuple[int, Any]:
         return await self._get("/decodestatus")
 
-    async def capture(self) -> tuple[int, Any]:
-        return await self._get("/capture")
-
     # -------------------------------------------------------------------------
     # NDI Finder
     # -------------------------------------------------------------------------
@@ -184,9 +206,6 @@ class BirdDogClient:
 
     async def reset_ndi(self) -> tuple[int, Any]:
         return await self._get("/reset")
-
-    async def refresh_ndi(self) -> tuple[int, Any]:
-        return await self._get("/refresh")
 
     async def get_ndi_discovery_server(self) -> tuple[int, Any]:
         return await self._get("/NDIDisServer")
@@ -215,12 +234,6 @@ class BirdDogClient:
 
     async def set_ptz_setup(self, data: dict) -> tuple[int, Any]:
         return await self._post("/birddogptzsetup", data)
-
-    async def recall_preset(self, preset: str) -> tuple[int, Any]:
-        return await self._post("/recall", {"Preset": preset})
-
-    async def save_preset(self, preset: str) -> tuple[int, Any]:
-        return await self._post("/save", {"Preset": preset})
 
     # -------------------------------------------------------------------------
     # Camera image settings
@@ -337,6 +350,37 @@ def _try_json(text: str) -> Any:
 
 
 # ---------------------------------------------------------------------------
+# Construction helpers (replace repeated constructor blocks across routes)
+# ---------------------------------------------------------------------------
+
+def client_config(app_config) -> dict:
+    """Extract the BirdDog-related config keys into a plain dict usable by
+    the bulk helpers.  Replaces several hand-built cfg_dict blocks."""
+    return {
+        "NDI_SUBNET_PREFIX": app_config["NDI_SUBNET_PREFIX"],
+        "NDI_DEVICE_PORT": app_config["NDI_DEVICE_PORT"],
+        "NDI_DEVICE_PASSWORD": app_config["NDI_DEVICE_PASSWORD"],
+        "HTTP_TIMEOUT": app_config["HTTP_TIMEOUT"],
+        "RECALL_CONCURRENCY": app_config.get("RECALL_CONCURRENCY", 10),
+    }
+
+
+def client_from_ip(ip: str, app_config) -> "BirdDogClient":
+    """Build a BirdDogClient for a raw IP string using Flask app config."""
+    return BirdDogClient(
+        ip=ip,
+        port=app_config["NDI_DEVICE_PORT"],
+        password=app_config["NDI_DEVICE_PASSWORD"],
+        timeout=app_config["HTTP_TIMEOUT"],
+    )
+
+
+def client_from_receiver(receiver, app_config) -> "BirdDogClient":
+    """Build a BirdDogClient for a receiver object (uses receiver.ip_address)."""
+    return client_from_ip(receiver.ip_address, app_config)
+
+
+# ---------------------------------------------------------------------------
 # Sync helpers for use inside Flask route handlers
 # ---------------------------------------------------------------------------
 
@@ -362,6 +406,7 @@ async def bulk_fetch_source(receivers: list, config: dict) -> list[dict]:
     Uses one HTTP call per device instead of the three required by bulk_fetch_status,
     making it suitable for frequent enforcement checks.
     Returns list of {"id", "online", "current_source"} dicts.
+    All requests share one aiohttp session for connection reuse.
     """
     prefix = config.get("NDI_SUBNET_PREFIX", "10.1.248.")
     port = config.get("NDI_DEVICE_PORT", 8080)
@@ -370,35 +415,38 @@ async def bulk_fetch_source(receivers: list, config: dict) -> list[dict]:
     concurrency = config.get("RECALL_CONCURRENCY", 10)
     sem = asyncio.Semaphore(concurrency)
 
-    async def _one(recv):
-        async with sem:
-            ip = f"{prefix}{recv['ip_last_octet']}"
-            client = BirdDogClient(ip, port=port, password=password, timeout=timeout)
-            code, data = await client.get_connect_to()
-            online = code == 200
-            current = None
-            if online and isinstance(data, dict):
-                raw = data.get("sourceName", "")
-                current = raw.strip() if raw else None
-            return {"id": recv["id"], "online": online, "current_source": current}
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+        async def _one(recv):
+            async with sem:
+                ip = f"{prefix}{recv['ip_last_octet']}"
+                client = BirdDogClient(ip, port=port, password=password,
+                                       timeout=timeout, session=session)
+                code, data = await client.get_connect_to()
+                online = code == 200
+                current = None
+                if online and isinstance(data, dict):
+                    raw = data.get("sourceName", "")
+                    current = raw.strip() if raw else None
+                return {"id": recv["id"], "online": online, "current_source": current}
 
-    tasks = [asyncio.create_task(_one(r)) for r in receivers]
-    return await asyncio.gather(*tasks, return_exceptions=False)
+        return await asyncio.gather(*[_one(r) for r in receivers], return_exceptions=False)
 
 
 async def bulk_fetch_status(receivers: list, config: dict) -> list[dict]:
-    """Concurrently fetch status for a list of receiver dicts."""
+    """Concurrently fetch status for a list of receiver dicts.
+    All requests share one aiohttp session for connection reuse."""
     prefix = config.get("NDI_SUBNET_PREFIX", "10.1.248.")
     port = config.get("NDI_DEVICE_PORT", 8080)
     password = config.get("NDI_DEVICE_PASSWORD", "birddog")
     timeout = config.get("HTTP_TIMEOUT", 5)
 
-    async def _one(recv):
-        ip = f"{prefix}{recv['ip_last_octet']}"
-        client = BirdDogClient(ip, port=port, password=password, timeout=timeout)
-        status = await client.fetch_status()
-        status["id"] = recv["id"]
-        return status
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+        async def _one(recv):
+            ip = f"{prefix}{recv['ip_last_octet']}"
+            client = BirdDogClient(ip, port=port, password=password,
+                                   timeout=timeout, session=session)
+            status = await client.fetch_status()
+            status["id"] = recv["id"]
+            return status
 
-    tasks = [asyncio.create_task(_one(r)) for r in receivers]
-    return await asyncio.gather(*tasks, return_exceptions=False)
+        return await asyncio.gather(*[_one(r) for r in receivers], return_exceptions=False)

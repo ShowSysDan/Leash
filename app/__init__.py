@@ -89,6 +89,15 @@ def create_app(config_name: str = "default") -> Flask:
     db.init_app(app)
     migrate.init_app(app, db)
 
+    # Belt-and-suspenders: if a request raises, roll back any pending SA state
+    # so the next request starts on a clean session. Flask-SQLAlchemy already
+    # calls session.remove() on teardown, but an explicit rollback on error
+    # makes the intent clear and guards against any future custom commits.
+    @app.teardown_request
+    def _rollback_on_error(exc):
+        if exc is not None:
+            db.session.rollback()
+
     from app.routes.main import main_bp
     from app.routes.api import api_bp
     from app.routes.groups_api import groups_api_bp

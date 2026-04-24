@@ -41,6 +41,12 @@ class ProductionConfig(Config):
 
     @classmethod
     def init_app(cls, app):
+        # Fail closed if SECRET_KEY wasn't overridden for production.
+        if app.config.get("SECRET_KEY") in (None, "", "change-me-in-production"):
+            raise RuntimeError(
+                "SECRET_KEY must be set to a secure random value in production. "
+                "Set the SECRET_KEY environment variable before starting Leash."
+            )
         # Render/Heroku supply postgres:// — SQLAlchemy requires postgresql://
         uri = cls.SQLALCHEMY_DATABASE_URI or ""
         if uri.startswith("postgres://"):

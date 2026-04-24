@@ -17,14 +17,18 @@ from flask import Blueprint, current_app, jsonify, request
 
 from app import db
 from app.models import NDIReceiver, ReceiverGroup
+from app.routes._helpers import (
+    err as _err,
+    valid_hex_color,
+    valid_name,
+    MAX_DESCRIPTION,
+)
 from app.services.audit_log import device_error, group_source_sent, source_changed, source_change_failed
-from app.services.birddog_client import BirdDogClient, run_async
+from app.services.birddog_client import client_from_receiver, run_async
 
 groups_api_bp = Blueprint("groups_api", __name__)
 
-
-def _err(msg, code=400):
-    return jsonify({"error": msg}), code
+_DEFAULT_COLOR = "#0d6efd"
 
 
 @groups_api_bp.route("/groups", methods=["GET"])
@@ -36,16 +40,17 @@ def list_groups():
 @groups_api_bp.route("/groups", methods=["POST"])
 def create_group():
     body = request.get_json(silent=True) or {}
-    if not body.get("name"):
-        return _err("name is required")
-    if ReceiverGroup.query.filter_by(name=body["name"]).first():
-        return _err(f"Group '{body['name']}' already exists", 409)
+    ok, name = valid_name(body.get("name"))
+    if not ok:
+        return _err("name is required (max 100 characters)")
+    if ReceiverGroup.query.filter_by(name=name).first():
+        return _err(f"Group '{name}' already exists", 409)
+    color = body.get("color", _DEFAULT_COLOR)
+    if not valid_hex_color(color):
+        return _err("color must be a hex colour (e.g. #0d6efd or #abc)")
+    desc = (body.get("description") or "").strip()[:MAX_DESCRIPTION]
 
-    group = ReceiverGroup(
-        name=body["name"],
-        color=body.get("color", "#0d6efd"),
-        description=body.get("description", ""),
-    )
+    group = ReceiverGroup(name=name, color=color, description=desc)
     db.session.add(group)
     db.session.commit()
     return jsonify(group.to_dict()), 201
@@ -62,11 +67,16 @@ def update_group(group_id: int):
     group = ReceiverGroup.query.get_or_404(group_id)
     body = request.get_json(silent=True) or {}
     if "name" in body:
-        group.name = body["name"]
+        ok, name = valid_name(body["name"])
+        if not ok:
+            return _err("name is required (max 100 characters)")
+        group.name = name
     if "color" in body:
+        if not valid_hex_color(body["color"]):
+            return _err("color must be a hex colour (e.g. #0d6efd or #abc)")
         group.color = body["color"]
     if "description" in body:
-        group.description = body["description"]
+        group.description = (body["description"] or "").strip()[:MAX_DESCRIPTION]
     db.session.commit()
     return jsonify(group.to_dict())
 
@@ -88,6 +98,10 @@ def add_to_group(group_id: int):
         return _err("receiver_ids list is required")
 
     receivers = NDIReceiver.query.filter(NDIReceiver.id.in_(ids)).all()
+    missing = set(ids) - {r.id for r in receivers}
+    if missing:
+        return _err(f"Unknown receiver ids: {sorted(missing)}")
+
     added = []
     for r in receivers:
         if r not in group.receivers:
@@ -128,12 +142,7 @@ def set_group_source(group_id: int):
 
     async def _apply_all():
         async def _one(recv):
-            client = BirdDogClient(
-                ip=recv.ip_address,
-                port=cfg["NDI_DEVICE_PORT"],
-                password=cfg["NDI_DEVICE_PASSWORD"],
-                timeout=cfg["HTTP_TIMEOUT"],
-            )
+            client = client_from_receiver(recv, cfg)
             code, data = await client.set_connect_to(source_name)
             return {"receiver_id": recv.id, "status": code, "ok": code == 200}
 
@@ -152,14 +161,14 @@ def set_group_source(group_id: int):
             recv.current_source = source_name
             recv.updated_at = now
             source_changed(
-                recv.label or recv.hostname or recv.ip_last_octet,
+                recv.display_name,
                 recv.ip_address, old_source, source_name, via=f"group:{group.name}",
             )
         else:
             http_status = next((r["status"] for r in results if r["receiver_id"] == recv.id), 0)
             device_error(recv.ip_address, "group_set_source", http_status)
             source_change_failed(
-                recv.label or recv.hostname or recv.ip_last_octet,
+                recv.display_name,
                 recv.ip_address, source_name, http_status, via=f"group:{group.name}",
             )
     db.session.commit()

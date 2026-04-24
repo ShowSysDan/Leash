@@ -16,17 +16,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (!canvas || !layoutId) return;
 
-  // ── Build source option HTML ────────────────────────────────────────────
-  function sourceOptions(current) {
-    let html = `<option value="">— source —</option>`;
+  // ── Populate a <select> with source options ─────────────────────────────
+  // Source names come from NDI devices (untrusted) — use Option() which
+  // assigns via text property, not innerHTML.
+  function fillSourceOptions(select, current) {
+    select.appendChild(new Option('— source —', ''));
     sources.forEach(name => {
-      html += `<option value="${name}" ${name === current ? 'selected' : ''}>${name}</option>`;
+      const opt = new Option(name, name);
+      if (name === current) opt.selected = true;
+      select.appendChild(opt);
     });
-    html += `<option value="Reboot">⚡ Reboot</option>`;
-    return html;
+    select.appendChild(new Option('⚡ Reboot', 'Reboot'));
   }
 
   // ── Render a single card ────────────────────────────────────────────────
+  // Build with createElement so device hostnames/labels cannot inject HTML.
   function makeCard(pos) {
     const r   = pos.receiver;
     const div = document.createElement('div');
@@ -36,18 +40,34 @@ document.addEventListener('DOMContentLoaded', () => {
     div.style.left = `${pos.x_pct}%`;
     div.style.top  = `${pos.y_pct}%`;
 
-    div.innerHTML = `
-      <div class="lc-card-header">
-        <span class="lc-hostname">${r?.hostname || r?.label || `.${r?.ip_last_octet}`}</span>
-        <span class="lc-index">${r?.ip_last_octet}</span>
-      </div>
-      <div class="lc-card-source">
-        <select class="lc-source-select" data-receiver-id="${pos.receiver_id}">
-          ${sourceOptions(r?.current_source)}
-        </select>
-      </div>
-      <button class="lc-remove-btn" data-receiver-id="${pos.receiver_id}" title="Remove from layout">×</button>
-    `;
+    const header = document.createElement('div');
+    header.className = 'lc-card-header';
+    const hostSpan = document.createElement('span');
+    hostSpan.className = 'lc-hostname';
+    hostSpan.textContent = r?.hostname || r?.label || `.${r?.ip_last_octet}`;
+    const ixSpan = document.createElement('span');
+    ixSpan.className = 'lc-index';
+    ixSpan.textContent = r?.ip_last_octet ?? '';
+    header.appendChild(hostSpan);
+    header.appendChild(ixSpan);
+
+    const sourceWrap = document.createElement('div');
+    sourceWrap.className = 'lc-card-source';
+    const select = document.createElement('select');
+    select.className = 'lc-source-select';
+    select.dataset.receiverId = pos.receiver_id;
+    fillSourceOptions(select, r?.current_source);
+    sourceWrap.appendChild(select);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'lc-remove-btn';
+    removeBtn.dataset.receiverId = pos.receiver_id;
+    removeBtn.title = 'Remove from layout';
+    removeBtn.textContent = '×';
+
+    div.appendChild(header);
+    div.appendChild(sourceWrap);
+    div.appendChild(removeBtn);
 
     // Source change
     div.querySelector('.lc-source-select').addEventListener('change', async e => {

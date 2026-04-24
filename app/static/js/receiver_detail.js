@@ -35,38 +35,59 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ── Settings panels — lazy load on tab click ────────────────────────────
+  // Settings keys and values come from the BirdDog device (untrusted).
+  // Build the form with createElement so the device can never inject HTML.
   function renderSettingsForm(container, group, data) {
+    container.textContent = '';
+
     if (typeof data !== 'object' || data === null) {
-      container.innerHTML = `<pre class="text-warning small">${JSON.stringify(data, null, 2)}</pre>`;
+      const pre = document.createElement('pre');
+      pre.className = 'text-warning small';
+      pre.textContent = JSON.stringify(data, null, 2);
+      container.appendChild(pre);
       return;
     }
 
     const isReadOnly = container.dataset.readonly === 'true';
-    const rows = Object.entries(data).map(([key, val]) => `
-      <div class="col-md-4 col-lg-3 mb-2 settings-form-group">
-        <label class="form-label mb-0">${key}</label>
-        <input type="text" class="form-control form-control-sm settings-field"
-               data-key="${key}" value="${val ?? ''}" ${isReadOnly ? 'readonly' : ''}>
-      </div>
-    `).join('');
+    const form = document.createElement('form');
+    form.className = 'row settings-form';
+    form.dataset.group = group;
 
-    container.innerHTML = `
-      <form class="row settings-form" data-group="${group}">
-        ${rows}
-        ${isReadOnly ? '' : `
-        <div class="col-12 mt-2">
-          <button type="submit" class="btn btn-sm btn-primary">
-            <i class="bi bi-check2 me-1"></i>Save
-          </button>
-        </div>`}
-      </form>
-    `;
+    Object.entries(data).forEach(([key, val]) => {
+      const col = document.createElement('div');
+      col.className = 'col-md-4 col-lg-3 mb-2 settings-form-group';
+      const label = document.createElement('label');
+      label.className = 'form-label mb-0';
+      label.textContent = key;
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'form-control form-control-sm settings-field';
+      input.dataset.key = key;
+      input.value = val ?? '';
+      if (isReadOnly) input.readOnly = true;
+      col.appendChild(label);
+      col.appendChild(input);
+      form.appendChild(col);
+    });
 
     if (!isReadOnly) {
-      container.querySelector('.settings-form').addEventListener('submit', async e => {
+      const saveCol = document.createElement('div');
+      saveCol.className = 'col-12 mt-2';
+      const saveBtn = document.createElement('button');
+      saveBtn.type = 'submit';
+      saveBtn.className = 'btn btn-sm btn-primary';
+      saveBtn.innerHTML = '<i class="bi bi-check2 me-1"></i>Save';
+      saveCol.appendChild(saveBtn);
+      form.appendChild(saveCol);
+    }
+
+    container.appendChild(form);
+
+    if (!isReadOnly) {
+      form.addEventListener('submit', async e => {
         e.preventDefault();
         const payload = {};
-        container.querySelectorAll('.settings-field').forEach(input => {
+        form.querySelectorAll('.settings-field').forEach(input => {
           payload[input.dataset.key] = input.value;
         });
         const resp = await fetch(`/api/receivers/${receiverId}/settings/${group}`, {

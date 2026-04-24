@@ -1,6 +1,6 @@
 from flask import Blueprint, current_app, render_template
+
 from app.models import NDIReceiver, NDISource, ReceiverGroup, Layout, Snapshot, ScheduledRecall
-from app import db
 
 main_bp = Blueprint("main", __name__)
 

@@ -52,26 +52,31 @@ async def scan_subnet(
     """
     Probe every host from prefix+start to prefix+end (inclusive).
     Returns a list of dicts for discovered BirdDog PLAY devices.
-    Uses a semaphore to cap concurrent connections and avoid overwhelming
-    the local network stack.
+    Uses a semaphore to cap concurrent connections and a single shared
+    aiohttp session so a full-subnet scan uses one connection pool
+    instead of creating a fresh session per probe.
     """
     sem = asyncio.Semaphore(64)
 
-    async def _probe(octet: int) -> Optional[dict]:
-        ip = f"{prefix}{octet}"
-        async with sem:
-            client = BirdDogClient(ip, port=port, password=password, timeout=timeout)
-            try:
-                code, data = await client.get_about()
-            except Exception as exc:
-                logger.debug("Probe %s error: %s", ip, exc)
-                return None
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+        async def _probe(octet: int) -> Optional[dict]:
+            ip = f"{prefix}{octet}"
+            async with sem:
+                client = BirdDogClient(ip, port=port, password=password,
+                                       timeout=timeout, session=session)
+                try:
+                    code, data = await client.get_about()
+                except Exception as exc:
+                    logger.debug("Probe %s error: %s", ip, exc)
+                    return None
 
-        if code == 200 and isinstance(data, dict) and _is_play_device(data):
-            logger.info("Found BirdDog PLAY at %s (%s)", ip, data.get("HostName", "?"))
-            return _parse_about(octet, ip, data)
-        return None
+            if code == 200 and isinstance(data, dict) and _is_play_device(data):
+                logger.info("Found BirdDog PLAY at %s (%s)", ip, data.get("HostName", "?"))
+                return _parse_about(octet, ip, data)
+            return None
 
-    tasks = [asyncio.create_task(_probe(i)) for i in range(start, end + 1)]
-    results = await asyncio.gather(*tasks, return_exceptions=False)
-    return [r for r in results if r is not None]
+        results = await asyncio.gather(
+            *[_probe(i) for i in range(start, end + 1)],
+            return_exceptions=False,
+        )
+        return [r for r in results if r is not None]

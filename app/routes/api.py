@@ -40,7 +40,13 @@ from app.services.audit_log import (
     source_changed,
     sources_discovered,
 )
-from app.services.birddog_client import BirdDogClient, bulk_fetch_status, run_async
+from app.routes._helpers import err as _err, valid_octet, MAX_LABEL
+from app.services.birddog_client import (
+    bulk_fetch_status,
+    client_config,
+    client_from_receiver,
+    run_async,
+)
 from app.services.scanner import scan_subnet
 
 logger = logging.getLogger(__name__)
@@ -84,20 +90,6 @@ SETTINGS_GROUPS = {
 }
 
 
-def _client(receiver: NDIReceiver) -> BirdDogClient:
-    cfg = current_app.config
-    return BirdDogClient(
-        ip=receiver.ip_address,
-        port=cfg["NDI_DEVICE_PORT"],
-        password=cfg["NDI_DEVICE_PASSWORD"],
-        timeout=cfg["HTTP_TIMEOUT"],
-    )
-
-
-def _err(msg: str, code: int = 400):
-    return jsonify({"error": msg}), code
-
-
 # ---------------------------------------------------------------------------
 # Receivers — CRUD
 # ---------------------------------------------------------------------------
@@ -112,27 +104,23 @@ def list_receivers():
 @api_bp.route("/receivers", methods=["POST"])
 def create_receiver():
     body = request.get_json(silent=True) or {}
-    if "ip_last_octet" not in body:
-        return _err("ip_last_octet is required")
-
-    octet = str(body["ip_last_octet"])
+    ok, octet = valid_octet(body.get("ip_last_octet"))
+    if not ok:
+        return _err("ip_last_octet must be an integer from 1 to 254")
     if NDIReceiver.query.filter_by(ip_last_octet=octet).first():
         return _err(f"Receiver with IP octet {octet} already exists", 409)
 
     # Use provided index, or last octet as integer, or next sequential
-    if "index" in body:
-        index = int(body["index"])
-    else:
-        index = int(octet) if octet.isdigit() else None
-    if index is None or NDIReceiver.query.filter_by(index=index).first():
+    index = int(body["index"]) if "index" in body else int(octet)
+    if NDIReceiver.query.filter_by(index=index).first():
         max_idx = db.session.query(db.func.max(NDIReceiver.index)).scalar() or 0
         index = max_idx + 1
 
-    receiver = NDIReceiver(
-        index=index,
-        ip_last_octet=octet,
-        label=body.get("label"),
-    )
+    label = (body.get("label") or None)
+    if label is not None:
+        label = str(label).strip()[:MAX_LABEL] or None
+
+    receiver = NDIReceiver(index=index, ip_last_octet=octet, label=label)
     db.session.add(receiver)
     db.session.commit()
     return jsonify(receiver.to_dict()), 201
@@ -150,9 +138,13 @@ def update_receiver(receiver_id: int):
     body = request.get_json(silent=True) or {}
 
     if "label" in body:
-        receiver.label = body["label"]
+        raw = body["label"]
+        receiver.label = (str(raw).strip()[:MAX_LABEL] or None) if raw else None
     if "ip_last_octet" in body:
-        receiver.ip_last_octet = str(body["ip_last_octet"])
+        ok, octet = valid_octet(body["ip_last_octet"])
+        if not ok:
+            return _err("ip_last_octet must be an integer from 1 to 254")
+        receiver.ip_last_octet = octet
 
     receiver.updated_at = datetime.utcnow()
     db.session.commit()
@@ -295,8 +287,8 @@ def set_source(receiver_id: int):
     if not source_name:
         return _err("source_name is required")
 
-    client = _client(receiver)
-    label = receiver.label or receiver.hostname or receiver.ip_last_octet
+    client = client_from_receiver(receiver, current_app.config)
+    label = receiver.display_name
 
     if source_name == "Reboot":
         code, data = run_async(client.reboot())
@@ -320,21 +312,21 @@ def set_source(receiver_id: int):
 @api_bp.route("/receivers/<int:receiver_id>/reboot", methods=["POST"])
 def reboot_receiver(receiver_id: int):
     receiver = NDIReceiver.query.get_or_404(receiver_id)
-    code, data = run_async(_client(receiver).reboot())
+    code, data = run_async(client_from_receiver(receiver, current_app.config).reboot())
     return jsonify({"status": code, "response": data})
 
 
 @api_bp.route("/receivers/<int:receiver_id>/restart", methods=["POST"])
 def restart_receiver(receiver_id: int):
     receiver = NDIReceiver.query.get_or_404(receiver_id)
-    code, data = run_async(_client(receiver).restart())
+    code, data = run_async(client_from_receiver(receiver, current_app.config).restart())
     return jsonify({"status": code, "response": data})
 
 
 @api_bp.route("/receivers/<int:receiver_id>/status", methods=["GET"])
 def poll_receiver_status(receiver_id: int):
     receiver = NDIReceiver.query.get_or_404(receiver_id)
-    result = run_async(_client(receiver).fetch_status())
+    result = run_async(client_from_receiver(receiver, current_app.config).fetch_status())
 
     # Persist to DB
     receiver.hostname = result.get("hostname") or receiver.hostname
@@ -360,14 +352,7 @@ def bulk_reload():
         return jsonify([])
 
     recv_dicts = [{"id": r.id, "ip_last_octet": r.ip_last_octet} for r in receivers]
-    cfg = {
-        "NDI_SUBNET_PREFIX": current_app.config["NDI_SUBNET_PREFIX"],
-        "NDI_DEVICE_PORT": current_app.config["NDI_DEVICE_PORT"],
-        "NDI_DEVICE_PASSWORD": current_app.config["NDI_DEVICE_PASSWORD"],
-        "HTTP_TIMEOUT": current_app.config["HTTP_TIMEOUT"],
-    }
-
-    results = run_async(bulk_fetch_status(recv_dicts, cfg))
+    results = run_async(bulk_fetch_status(recv_dicts, client_config(current_app.config)))
 
     # Build a lookup and persist
     result_map = {r["id"]: r for r in results}
@@ -403,7 +388,7 @@ def get_settings(receiver_id: int, group: str):
 
     receiver = NDIReceiver.query.get_or_404(receiver_id)
     getter_name, _ = SETTINGS_GROUPS[group]
-    client = _client(receiver)
+    client = client_from_receiver(receiver, current_app.config)
     code, data = run_async(getattr(client, getter_name)())
     return jsonify({"status": code, "group": group, "data": data})
 
@@ -419,7 +404,7 @@ def set_settings(receiver_id: int, group: str):
 
     receiver = NDIReceiver.query.get_or_404(receiver_id)
     body = request.get_json(silent=True) or {}
-    client = _client(receiver)
+    client = client_from_receiver(receiver, current_app.config)
 
     # Plain-text setters expect a string value under key "value"
     if group in ("operation_mode", "video_output", "ndi_group", "ndi_offsubnet"):
@@ -462,12 +447,7 @@ def discover_sources():
             return _err("No receivers configured", 404)
 
     async def _discover():
-        client = BirdDogClient(
-            ip=receiver.ip_address,
-            port=current_app.config["NDI_DEVICE_PORT"],
-            password=current_app.config["NDI_DEVICE_PASSWORD"],
-            timeout=current_app.config["HTTP_TIMEOUT"],
-        )
+        client = client_from_receiver(receiver, current_app.config)
         await client.reset_ndi()
         await asyncio.sleep(3)
         code, data = await client.get_ndi_list()

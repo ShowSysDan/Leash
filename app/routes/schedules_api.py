@@ -1,47 +1,32 @@
 """
 Schedules API
 
-GET    /api/schedules              list all
-POST   /api/schedules              create
-GET    /api/schedules/<id>         get one
-PUT    /api/schedules/<id>         update
-DELETE /api/schedules/<id>         delete
-PATCH  /api/schedules/<id>/toggle  flip enabled flag
+GET    /api/schedules                  list all
+POST   /api/schedules                  create
+GET    /api/schedules/<id>             get one
+PUT    /api/schedules/<id>             update
+DELETE /api/schedules/<id>             delete
+PATCH  /api/schedules/<id>/toggle      flip enabled flag
+DELETE /api/schedules/<id>/enforcement end an active enforcement window early
 """
-import re
 from datetime import datetime
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, jsonify, request
 
 from app import db
 from app.models import ScheduledRecall, Snapshot
+from app.routes._helpers import err as _err, valid_time_of_day, valid_name
 
 schedules_api_bp = Blueprint("schedules_api", __name__)
 
-_TIME_RE = re.compile(r"^\d{2}:\d{2}$")
 _VALID_DAYS = {"0", "1", "2", "3", "4", "5", "6"}
-
-
-def _err(msg, code=400):
-    return jsonify({"error": msg}), code
-
-
-def _reload():
-    """Re-register scheduler jobs after any change."""
-    from app.services.scheduler import get_scheduler
-    scheduler = get_scheduler()
-    if scheduler:
-        from app.services.scheduler import _check_schedules  # noqa: F401
-        # Jobs are re-evaluated every minute from DB — no dynamic job reload needed.
-        # This is a no-op hook kept for future use if we switch to per-job cron triggers.
-        pass
 
 
 def _validate_body(body: dict):
     """Return (cleaned_data, error_string). error_string is None on success."""
-    name = (body.get("name") or "").strip()
-    if not name:
-        return None, "name is required"
+    ok, name = valid_name(body.get("name"))
+    if not ok:
+        return None, "name is required (max 100 characters)"
 
     snap_id = body.get("snapshot_id")
     if snap_id is None:
@@ -59,13 +44,9 @@ def _validate_body(body: dict):
     days_str = ",".join(sorted(set(days_list), key=int))
 
     time_str = (body.get("time_of_day") or "").strip()
-    if not _TIME_RE.match(time_str):
+    if not valid_time_of_day(time_str):
         return None, "time_of_day must be HH:MM (24-hour, local server time)"
-    h, m = int(time_str[:2]), int(time_str[3:])
-    if not (0 <= h <= 23 and 0 <= m <= 59):
-        return None, "time_of_day out of range"
 
-    persistent = bool(body.get("persistent", False))
     persist_minutes = int(body.get("persist_minutes", 60))
     if persist_minutes < 1 or persist_minutes > 1440:
         return None, "persist_minutes must be between 1 and 1440"
@@ -76,7 +57,7 @@ def _validate_body(body: dict):
         "days_of_week": days_str,
         "time_of_day": time_str,
         "enabled": bool(body.get("enabled", True)),
-        "persistent": persistent,
+        "persistent": bool(body.get("persistent", False)),
         "persist_minutes": persist_minutes,
     }, None
 
@@ -97,7 +78,6 @@ def create_schedule():
     sched = ScheduledRecall(**data)
     db.session.add(sched)
     db.session.commit()
-    _reload()
     return jsonify(sched.to_dict()), 201
 
 
@@ -119,7 +99,6 @@ def update_schedule(sched_id: int):
         setattr(sched, k, v)
     sched.updated_at = datetime.utcnow()
     db.session.commit()
-    _reload()
     return jsonify(sched.to_dict())
 
 
@@ -128,7 +107,6 @@ def delete_schedule(sched_id: int):
     sched = ScheduledRecall.query.get_or_404(sched_id)
     db.session.delete(sched)
     db.session.commit()
-    _reload()
     return jsonify({"deleted": sched_id})
 
 
@@ -138,7 +116,6 @@ def toggle_schedule(sched_id: int):
     sched.enabled = not sched.enabled
     sched.updated_at = datetime.utcnow()
     db.session.commit()
-    _reload()
     return jsonify(sched.to_dict())
 
 
