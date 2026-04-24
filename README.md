@@ -8,11 +8,16 @@ shared subnet, with SQLite for development and PostgreSQL for production.
 
 ## Features
 
+- **Auto-scan** — concurrently probes all 254 addresses on the subnet and
+  auto-detects BirdDog PLAY devices via `/about`.  Hostname, firmware version,
+  serial number, and network info are captured on first contact and cached.
 - **Dashboard** — grid view of all receivers showing live hostname, current NDI
-  source, and online/offline status.
-- **Source management** — NDI sources are **cached in the database** so they
-  remain available without re-running discovery every session.
-- **Bulk reload** — concurrently polls all receivers in parallel (async/aiohttp).
+  source, and online/offline status.  Offline devices are dimmed and can be
+  removed with one click.
+- **Source caching** — NDI sources are **stored in the database** so they
+  remain available across sessions without re-running discovery.
+- **Bulk reload** — concurrently polls all known receivers in parallel
+  (asyncio + aiohttp).  Marks any that don't respond as offline.
 - **Source discovery** — triggers `/reset` + `/List` on a reference device and
   merges results into the DB, preserving previously-seen sources.
 - **Per-receiver settings** — tabbed settings page covering Decode, Transport,
@@ -172,7 +177,30 @@ journalctl --user -u leash -f
 
 ---
 
+## Auto-Scan Workflow
+
+1. Click **Scan Network** in the toolbar (or `POST /api/scan`).
+2. Leash concurrently probes `10.1.248.1` → `10.1.248.254` (configurable range).
+3. Any device whose `/about` response contains `"HardwareVersion": "BirdDog PLAY"` is upserted.
+4. Hostname, firmware, serial, and network info are cached immediately.
+5. Any receiver already in the DB that **didn't** respond is marked **offline**.
+6. Offline receivers can be removed individually via the trash button, or will
+   reappear as online on the next scan if they come back.
+
+Polling (`Reload All`) refreshes `/hostname` and `/connectTo` on every known
+receiver, keeping hostnames current even after a player moves to a new location.
+
+---
+
 ## API Reference
+
+### Scan
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/scan` | Scan subnet, upsert found BirdDog PLAY devices, mark missing as offline |
+
+Body (optional): `{"start": 1, "end": 254}` to limit scan range.
 
 ### Receivers
 

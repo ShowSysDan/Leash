@@ -7,18 +7,34 @@ class NDIReceiver(db.Model):
     __tablename__ = "ndi_receivers"
 
     id = db.Column(db.Integer, primary_key=True)
-    index = db.Column(db.Integer, unique=True, nullable=False)  # 1–83
+    # Ordering / display index — auto-assigned as int(ip_last_octet) on scan
+    index = db.Column(db.Integer, unique=True, nullable=False)
     label = db.Column(db.String(100))
-    ip_last_octet = db.Column(db.String(3), nullable=False)
+    # Last octet is the stable lookup key; enforce uniqueness
+    ip_last_octet = db.Column(db.String(3), unique=True, nullable=False)
 
-    # Cached live values (refreshed on demand)
+    # ── Live values from /about (refreshed on scan/poll) ──────────────────
     hostname = db.Column(db.String(255))
     current_source = db.Column(db.String(255))
-    status = db.Column(db.String(20), default="unknown")  # online / offline / unknown
-    firmware_version = db.Column(db.String(50))
+    # online / offline / unknown
+    status = db.Column(db.String(20), default="unknown")
+
+    # Device identity
+    hardware_version = db.Column(db.String(100))
+    firmware_version = db.Column(db.String(100))
     serial_number = db.Column(db.String(50))
+    mcu_version = db.Column(db.String(50))
     video_format = db.Column(db.String(50))
 
+    # Network info
+    network_config_method = db.Column(db.String(20))  # static / dhcp
+    gateway = db.Column(db.String(20))
+    network_mask = db.Column(db.String(20))
+    fallback_ip = db.Column(db.String(20))
+
+    # Discovery bookkeeping
+    first_seen = db.Column(db.DateTime, default=datetime.utcnow)
+    last_seen = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -31,15 +47,22 @@ class NDIReceiver(db.Model):
         return {
             "id": self.id,
             "index": self.index,
-            "label": self.label or f"Receiver {self.index}",
+            "label": self.label or self.hostname or f"Player {self.ip_last_octet}",
             "ip_last_octet": self.ip_last_octet,
             "ip_address": self.ip_address,
             "hostname": self.hostname,
             "current_source": self.current_source,
             "status": self.status,
+            "hardware_version": self.hardware_version,
             "firmware_version": self.firmware_version,
             "serial_number": self.serial_number,
+            "mcu_version": self.mcu_version,
             "video_format": self.video_format,
+            "network_config_method": self.network_config_method,
+            "gateway": self.gateway,
+            "network_mask": self.network_mask,
+            "fallback_ip": self.fallback_ip,
+            "last_seen": self.last_seen.isoformat() if self.last_seen else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
 

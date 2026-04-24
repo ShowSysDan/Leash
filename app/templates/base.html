@@ -33,7 +33,10 @@
           </a>
         </li>
       </ul>
-      <div class="d-flex gap-2">
+      <div class="d-flex gap-2 flex-wrap">
+        <button id="btn-scan" class="btn btn-sm btn-outline-primary" title="Scan subnet for BirdDog PLAY devices">
+          <i class="bi bi-search me-1"></i>Scan Network
+        </button>
         <button id="btn-bulk-reload" class="btn btn-sm btn-outline-info" title="Reload all receiver status">
           <i class="bi bi-arrow-repeat me-1"></i>Reload All
         </button>
@@ -44,6 +47,26 @@
     </div>
   </div>
 </nav>
+
+<!-- Scan result modal -->
+<div class="modal fade" id="scanResultModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-search me-2"></i>Scan Results</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="scan-result-body">
+        <div class="loader-overlay"><span class="spinner-border me-2"></span>Scanning 10.1.248.1–254…</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button class="btn btn-primary" id="btn-scan-reload-page" style="display:none"
+                onclick="location.reload()">Refresh Page</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <div id="toast-container" class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index:9999"></div>
 

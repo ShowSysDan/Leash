@@ -61,6 +61,11 @@
   color: #6c757d;
 }
 
+/* Offline card — slightly dimmed */
+.receiver-card.border-danger {
+  opacity: 0.8;
+}
+
 /* Pulsing animation for reload-in-progress cards */
 @keyframes pulse-border {
   0%   { border-color: rgba(13, 202, 240, 0.3); }

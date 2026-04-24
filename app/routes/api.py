@@ -15,6 +15,9 @@ Receiver endpoints
   GET    /api/receivers/<id>/settings/<group>   get a settings group
   POST   /api/receivers/<id>/settings/<group>   set a settings group
 
+Scan endpoint
+  POST   /api/scan                        subnet scan for BirdDog PLAY devices
+
 Source endpoints
   GET    /api/sources                     list cached sources
   POST   /api/sources/discover            reset + list from a reference device
@@ -28,6 +31,7 @@ from flask import Blueprint, current_app, jsonify, request
 from app import db
 from app.models import NDIReceiver, NDISource
 from app.services.birddog_client import BirdDogClient, bulk_fetch_status, run_async
+from app.services.scanner import scan_subnet
 
 api_bp = Blueprint("api", __name__)
 
@@ -89,15 +93,25 @@ def list_receivers():
 @api_bp.route("/receivers", methods=["POST"])
 def create_receiver():
     body = request.get_json(silent=True) or {}
-    if "index" not in body or "ip_last_octet" not in body:
-        return _err("index and ip_last_octet are required")
+    if "ip_last_octet" not in body:
+        return _err("ip_last_octet is required")
 
-    if NDIReceiver.query.filter_by(index=body["index"]).first():
-        return _err(f"Receiver with index {body['index']} already exists", 409)
+    octet = str(body["ip_last_octet"])
+    if NDIReceiver.query.filter_by(ip_last_octet=octet).first():
+        return _err(f"Receiver with IP octet {octet} already exists", 409)
+
+    # Use provided index, or last octet as integer, or next sequential
+    if "index" in body:
+        index = int(body["index"])
+    else:
+        index = int(octet) if octet.isdigit() else None
+    if index is None or NDIReceiver.query.filter_by(index=index).first():
+        max_idx = db.session.query(db.func.max(NDIReceiver.index)).scalar() or 0
+        index = max_idx + 1
 
     receiver = NDIReceiver(
-        index=int(body["index"]),
-        ip_last_octet=str(body["ip_last_octet"]),
+        index=index,
+        ip_last_octet=octet,
         label=body.get("label"),
     )
     db.session.add(receiver)
@@ -132,6 +146,102 @@ def delete_receiver(receiver_id: int):
     db.session.delete(receiver)
     db.session.commit()
     return jsonify({"deleted": receiver_id})
+
+
+# ---------------------------------------------------------------------------
+# Subnet scan — auto-detect BirdDog PLAY devices
+# ---------------------------------------------------------------------------
+
+
+@api_bp.route("/scan", methods=["POST"])
+def scan():
+    """
+    Concurrently probe all 254 addresses on the configured subnet.
+    Devices that identify as BirdDog PLAY via /about are upserted into the DB.
+    Receivers already in the DB that were NOT found are marked offline.
+    Returns counts and full receiver list.
+    """
+    body = request.get_json(silent=True) or {}
+    start = int(body.get("start", 1))
+    end = int(body.get("end", 254))
+
+    cfg = current_app.config
+    found = run_async(scan_subnet(
+        prefix=cfg["NDI_SUBNET_PREFIX"],
+        port=cfg["NDI_DEVICE_PORT"],
+        password=cfg["NDI_DEVICE_PASSWORD"],
+        timeout=2,
+        start=start,
+        end=end,
+    ))
+
+    now = datetime.utcnow()
+    found_octets = {d["ip_last_octet"] for d in found}
+    added = []
+    updated = []
+
+    for device in found:
+        octet = device["ip_last_octet"]
+        existing = NDIReceiver.query.filter_by(ip_last_octet=octet).first()
+
+        if existing:
+            existing.hostname = device["hostname"] or existing.hostname
+            existing.status = "online"
+            existing.hardware_version = device.get("hardware_version") or existing.hardware_version
+            existing.firmware_version = device.get("firmware_version") or existing.firmware_version
+            existing.serial_number = device.get("serial_number") or existing.serial_number
+            existing.mcu_version = device.get("mcu_version") or existing.mcu_version
+            existing.video_format = device.get("video_format") or existing.video_format
+            existing.network_config_method = device.get("network_config_method") or existing.network_config_method
+            existing.gateway = device.get("gateway") or existing.gateway
+            existing.network_mask = device.get("network_mask") or existing.network_mask
+            existing.fallback_ip = device.get("fallback_ip") or existing.fallback_ip
+            existing.last_seen = now
+            existing.updated_at = now
+            updated.append(existing)
+        else:
+            # Auto-assign index = last octet integer if not taken
+            index = int(octet) if octet.isdigit() else None
+            if index is None or NDIReceiver.query.filter_by(index=index).first():
+                max_idx = db.session.query(db.func.max(NDIReceiver.index)).scalar() or 0
+                index = max_idx + 1
+
+            new_recv = NDIReceiver(
+                index=index,
+                ip_last_octet=octet,
+                hostname=device["hostname"],
+                status="online",
+                hardware_version=device.get("hardware_version"),
+                firmware_version=device.get("firmware_version"),
+                serial_number=device.get("serial_number"),
+                mcu_version=device.get("mcu_version"),
+                video_format=device.get("video_format"),
+                network_config_method=device.get("network_config_method"),
+                gateway=device.get("gateway"),
+                network_mask=device.get("network_mask"),
+                fallback_ip=device.get("fallback_ip"),
+                last_seen=now,
+                first_seen=now,
+            )
+            db.session.add(new_recv)
+            db.session.flush()  # get the id before commit
+            added.append(new_recv)
+
+    # Mark any known receiver that didn't respond as offline
+    NDIReceiver.query.filter(
+        NDIReceiver.ip_last_octet.notin_(found_octets)
+    ).update({"status": "offline", "updated_at": now}, synchronize_session=False)
+
+    db.session.commit()
+
+    all_receivers = NDIReceiver.query.order_by(NDIReceiver.index).all()
+    return jsonify({
+        "scanned": end - start + 1,
+        "found": len(found),
+        "added": len(added),
+        "updated": len(updated),
+        "receivers": [r.to_dict() for r in all_receivers],
+    })
 
 
 # ---------------------------------------------------------------------------

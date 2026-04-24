@@ -3,32 +3,45 @@
 
 {% block content %}
 <div class="d-flex align-items-center mb-3 gap-3 flex-wrap">
-  <h4 class="mb-0 text-light">NDI Receivers
-    <span class="badge bg-secondary ms-1">{{ receivers|length }}</span>
+  <h4 class="mb-0 text-light">
+    NDI Receivers
+    <span class="badge bg-secondary ms-1" id="total-count">{{ receivers|length }}</span>
+    <span class="ms-2 small text-success" id="online-count">
+      {{ receivers|selectattr('status','equalto','online')|list|length }} online
+    </span>
+    {% set offline_count = receivers|selectattr('status','equalto','offline')|list|length %}
+    {% if offline_count %}
+    <span class="ms-1 small text-danger">/ {{ offline_count }} offline</span>
+    {% endif %}
   </h4>
   <div class="ms-auto d-flex gap-2">
+    <div class="form-check form-switch mt-1" title="Show offline receivers">
+      <input class="form-check-input" type="checkbox" id="show-offline" checked>
+      <label class="form-check-label small text-muted" for="show-offline">Show offline</label>
+    </div>
     <button class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#addReceiverModal">
-      <i class="bi bi-plus-circle me-1"></i>Add Receiver
+      <i class="bi bi-plus-circle me-1"></i>Add
     </button>
   </div>
 </div>
 
 {% if not receivers %}
 <div class="alert alert-secondary text-center py-5">
-  <i class="bi bi-inbox display-4 d-block mb-2"></i>
-  No receivers configured yet.
-  <a href="#" data-bs-toggle="modal" data-bs-target="#addReceiverModal">Add one</a> to get started.
+  <i class="bi bi-wifi-off display-4 d-block mb-3"></i>
+  <strong>No receivers found yet.</strong><br>
+  Click <strong>Scan Network</strong> in the toolbar to auto-detect BirdDog PLAY devices,<br>
+  or <a href="#" data-bs-toggle="modal" data-bs-target="#addReceiverModal">add one manually</a>.
 </div>
 {% else %}
 <div id="receivers-grid" class="row row-cols-1 row-cols-md-2 row-cols-xl-3 row-cols-xxl-4 g-3">
   {% for r in receivers %}
-  <div class="col" id="col-{{ r.id }}">
-    <div class="card h-100 receiver-card {% if r.status == 'online' %}border-success{% elif r.status == 'offline' %}border-danger{% else %}border-secondary{% endif %}"
+  <div class="col receiver-col {% if r.status == 'offline' %}col-offline{% endif %}" id="col-{{ r.id }}">
+    <div class="card h-100 receiver-card border-{{ 'success' if r.status == 'online' else 'danger' if r.status == 'offline' else 'secondary' }}"
          data-receiver-id="{{ r.id }}">
       <div class="card-header d-flex align-items-center gap-2 py-2">
         <span class="status-dot status-{{ r.status }}"></span>
-        <span class="fw-semibold text-truncate flex-grow-1">
-          {{ r.label or ('Receiver ' ~ r.index) }}
+        <span class="fw-semibold text-truncate flex-grow-1 hostname-display">
+          {{ r.hostname or r.label or ('Player ' ~ r.ip_last_octet) }}
         </span>
         <small class="text-muted ms-auto text-nowrap">{{ r.ip_address }}</small>
         <a href="{{ url_for('main.receiver_detail', receiver_id=r.id) }}"
@@ -37,14 +50,23 @@
         </a>
       </div>
       <div class="card-body py-2">
+        {% if r.status == 'offline' %}
+        <div class="text-danger small mb-2">
+          <i class="bi bi-exclamation-circle me-1"></i>Device offline
+          {% if r.last_seen %}
+          <span class="text-muted">· last seen {{ r.last_seen.strftime('%m/%d %H:%M') }}</span>
+          {% endif %}
+        </div>
+        {% endif %}
         <div class="mb-2">
-          <small class="text-muted">Hostname</small>
-          <div class="hostname-display text-truncate">{{ r.hostname or '—' }}</div>
+          <small class="text-muted">Firmware</small>
+          <div class="text-truncate small firmware-display">{{ r.firmware_version or '—' }}</div>
         </div>
         <div>
           <small class="text-muted">NDI Source</small>
           <select class="form-select form-select-sm source-select mt-1"
-                  data-receiver-id="{{ r.id }}">
+                  data-receiver-id="{{ r.id }}"
+                  {% if r.status == 'offline' %}disabled{% endif %}>
             <option value="">— select source —</option>
             {% for s in sources %}
             <option value="{{ s.name }}"
@@ -59,6 +81,14 @@
         </div>
       </div>
       <div class="card-footer py-1 d-flex gap-1 justify-content-end">
+        {% if r.status == 'offline' %}
+        <button class="btn btn-xs btn-outline-danger btn-remove-offline"
+                data-receiver-id="{{ r.id }}"
+                data-receiver-name="{{ r.hostname or r.ip_address }}"
+                title="Remove offline device">
+          <i class="bi bi-trash me-1"></i>Remove
+        </button>
+        {% else %}
         <button class="btn btn-xs btn-outline-info btn-poll"
                 data-receiver-id="{{ r.id }}" title="Refresh status">
           <i class="bi bi-arrow-clockwise"></i>
@@ -71,6 +101,7 @@
                 data-receiver-id="{{ r.id }}" title="Reboot device">
           <i class="bi bi-power"></i>
         </button>
+        {% endif %}
       </div>
     </div>
   </div>
@@ -83,20 +114,20 @@
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">Add Receiver</h5>
+        <h5 class="modal-title">Add Receiver Manually</h5>
         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
+        <p class="text-muted small">
+          Use <strong>Scan Network</strong> in the toolbar to auto-detect all BirdDog PLAY devices.
+          Manual entry is for cases where a device isn't responding to the scan.
+        </p>
         <div class="mb-3">
-          <label class="form-label">Index <small class="text-muted">(1–83)</small></label>
-          <input type="number" id="add-index" class="form-control" min="1" max="83">
+          <label class="form-label">IP Last Octet <small class="text-muted">(e.g. 83 → 10.1.248.83)</small></label>
+          <input type="text" id="add-octet" class="form-control" placeholder="83">
         </div>
         <div class="mb-3">
-          <label class="form-label">IP Last Octet <small class="text-muted">(e.g. 168 → 10.1.248.168)</small></label>
-          <input type="text" id="add-octet" class="form-control" placeholder="168">
-        </div>
-        <div class="mb-3">
-          <label class="form-label">Label <small class="text-muted">(optional)</small></label>
+          <label class="form-label">Label <small class="text-muted">(optional — hostname pulled automatically)</small></label>
           <input type="text" id="add-label" class="form-control" placeholder="Stage Left Camera">
         </div>
       </div>
@@ -111,8 +142,14 @@
 
 {% block extra_js %}
 <script>
-// Seed source list for JS-side updates
 window.LEASH = window.LEASH || {};
 window.LEASH.sources = {{ sources | map(attribute='name') | list | tojson }};
+
+// Show/hide offline toggle
+document.getElementById('show-offline').addEventListener('change', function() {
+  document.querySelectorAll('.col-offline').forEach(col => {
+    col.style.display = this.checked ? '' : 'none';
+  });
+});
 </script>
 {% endblock %}
