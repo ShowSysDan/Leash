@@ -24,14 +24,26 @@ Source endpoints
   DELETE /api/sources/<id>                remove cached source
 """
 import asyncio
+import logging
 from datetime import datetime
 
 from flask import Blueprint, current_app, jsonify, request
 
 from app import db
 from app.models import NDIReceiver, NDISource
+from app.services.audit_log import (
+    device_error,
+    receiver_added,
+    receiver_went_offline,
+    scan_complete,
+    source_change_failed,
+    source_changed,
+    sources_discovered,
+)
 from app.services.birddog_client import BirdDogClient, bulk_fetch_status, run_async
 from app.services.scanner import scan_subnet
+
+logger = logging.getLogger(__name__)
 
 api_bp = Blueprint("api", __name__)
 
@@ -227,12 +239,30 @@ def scan():
             db.session.flush()  # get the id before commit
             added.append(new_recv)
 
+    # Collect receivers going offline before the bulk update so we can log them
+    going_offline = NDIReceiver.query.filter(
+        NDIReceiver.ip_last_octet.notin_(found_octets),
+        NDIReceiver.status == "online",
+    ).all()
+
     # Mark any known receiver that didn't respond as offline
     NDIReceiver.query.filter(
         NDIReceiver.ip_last_octet.notin_(found_octets)
     ).update({"status": "offline", "updated_at": now}, synchronize_session=False)
 
     db.session.commit()
+
+    for r in added:
+        receiver_added(r.ip_address, r.hostname or "")
+    for r in going_offline:
+        receiver_went_offline(r.ip_address, r.hostname or "")
+    scan_complete(
+        scanned=end - start + 1,
+        found=len(found),
+        added=len(added),
+        updated=len(updated),
+        offline=len(going_offline),
+    )
 
     all_receivers = NDIReceiver.query.order_by(NDIReceiver.index).all()
     return jsonify({
@@ -259,17 +289,23 @@ def set_source(receiver_id: int):
         return _err("source_name is required")
 
     client = _client(receiver)
+    label = receiver.label or receiver.hostname or receiver.ip_last_octet
 
     if source_name == "Reboot":
         code, data = run_async(client.reboot())
         return jsonify({"action": "reboot", "status": code, "response": data})
 
+    old_source = receiver.current_source
     code, data = run_async(client.set_connect_to(source_name))
     if code == 200:
         receiver.current_source = source_name
         receiver.status = "online"
         receiver.updated_at = datetime.utcnow()
         db.session.commit()
+        source_changed(label, receiver.ip_address, old_source, source_name, via="ui")
+    else:
+        device_error(receiver.ip_address, "set_source", code)
+        source_change_failed(label, receiver.ip_address, source_name, code, via="ui")
 
     return jsonify({"status": code, "response": data})
 
@@ -433,6 +469,7 @@ def discover_sources():
     code, data = run_async(_discover())
 
     if code != 200:
+        device_error(receiver.ip_address, "discover_sources", code)
         return jsonify({"error": "Discovery failed", "status": code, "response": data}), 502
 
     if not isinstance(data, dict):
@@ -468,12 +505,18 @@ def discover_sources():
 
     # Mark previously-discovered sources that are no longer visible as offline
     seen_names = {n.strip() for n in data if n.strip() and n.strip() != "None"}
+    going_offline_count = NDISource.query.filter(
+        NDISource.discovered == True,
+        NDISource.name.notin_(seen_names),
+    ).count()
     NDISource.query.filter(
         NDISource.discovered == True,
         NDISource.name.notin_(seen_names),
     ).update({"discovered": False}, synchronize_session=False)
 
     db.session.commit()
+
+    sources_discovered(added, updated, going_offline_count, via=receiver.ip_address)
 
     all_sources = NDISource.query.order_by(NDISource.source_index).all()
     return jsonify({

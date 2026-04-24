@@ -17,6 +17,7 @@ from flask import Blueprint, current_app, jsonify, request
 
 from app import db
 from app.models import NDIReceiver, ReceiverGroup
+from app.services.audit_log import device_error, group_source_sent, source_changed, source_change_failed
 from app.services.birddog_client import BirdDogClient, run_async
 
 groups_api_bp = Blueprint("groups_api", __name__)
@@ -144,11 +145,26 @@ def set_group_source(group_id: int):
     # Persist successful updates
     ok_ids = {r["receiver_id"] for r in results if r.get("ok")}
     now = datetime.utcnow()
+    recv_map = {recv.id: recv for recv in targets}
     for recv in targets:
+        old_source = recv.current_source
         if recv.id in ok_ids:
             recv.current_source = source_name
             recv.updated_at = now
+            source_changed(
+                recv.label or recv.hostname or recv.ip_last_octet,
+                recv.ip_address, old_source, source_name, via=f"group:{group.name}",
+            )
+        else:
+            http_status = next((r["status"] for r in results if r["receiver_id"] == recv.id), 0)
+            device_error(recv.ip_address, "group_set_source", http_status)
+            source_change_failed(
+                recv.label or recv.hostname or recv.ip_last_octet,
+                recv.ip_address, source_name, http_status, via=f"group:{group.name}",
+            )
     db.session.commit()
+
+    group_source_sent(group.name, source_name, len(targets), len(ok_ids))
 
     return jsonify({
         "source_name": source_name,

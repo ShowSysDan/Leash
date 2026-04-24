@@ -35,6 +35,7 @@ from flask import Blueprint, current_app, jsonify, request
 
 from app import db
 from app.models import NDIReceiver, NDISource
+from app.services.audit_log import device_error, source_change_failed, source_changed
 from app.services.birddog_client import BirdDogClient, run_async
 
 v1_bp = Blueprint("v1", __name__)
@@ -184,12 +185,20 @@ def _do_route(ip_octet: str, source_name: str, cfg: dict) -> dict:
     )
     code, data = run_async(client.set_connect_to(source_name))
     ok = code == 200
+    recv = NDIReceiver.query.filter_by(ip_last_octet=str(ip_octet)).first()
+    label = (recv.label or recv.hostname or ip_octet) if recv else ip_octet
     if ok:
-        recv = NDIReceiver.query.filter_by(ip_last_octet=str(ip_octet)).first()
         if recv:
+            old_source = recv.current_source
             recv.current_source = source_name
             recv.updated_at = datetime.utcnow()
             db.session.commit()
+        else:
+            old_source = None
+        source_changed(label, ip, old_source, source_name, via="v1")
+    else:
+        device_error(ip, "v1_route", code)
+        source_change_failed(label, ip, source_name, code, via="v1")
     return {
         "ip_octet": ip_octet,
         "ip_address": ip,
@@ -286,14 +295,23 @@ def route_bulk():
 
     results = run_async(_apply_all()) if tasks else []
 
-    # Persist successful routes
+    # Persist successful routes and emit audit events
     now = datetime.utcnow()
     for r in results:
+        recv = NDIReceiver.query.filter_by(ip_last_octet=r["ip_octet"]).first()
+        label = (recv.label or recv.hostname or r["ip_octet"]) if recv else r["ip_octet"]
         if r["ok"]:
-            recv = NDIReceiver.query.filter_by(ip_last_octet=r["ip_octet"]).first()
             if recv:
+                old_source = recv.current_source
                 recv.current_source = r["source_name"]
                 recv.updated_at = now
+            else:
+                old_source = None
+            source_changed(label, r["ip_address"], old_source, r["source_name"], via="v1_bulk")
+        else:
+            device_error(r["ip_address"], "v1_route_bulk", r.get("http_status", 0))
+            source_change_failed(label, r["ip_address"], r["source_name"],
+                                 r.get("http_status", 0), via="v1_bulk")
     if results:
         db.session.commit()
 

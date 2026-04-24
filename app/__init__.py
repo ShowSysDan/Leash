@@ -1,4 +1,5 @@
 import logging
+import logging.handlers
 from pathlib import Path
 
 from flask import Flask
@@ -11,6 +12,38 @@ db = SQLAlchemy()
 migrate = Migrate()
 
 logger = logging.getLogger(__name__)
+
+
+def _configure_syslog(app: Flask) -> None:
+    """Attach a SysLogHandler to the 'leash' logger hierarchy.
+
+    Tries the Unix domain socket (/dev/log on Linux, /var/run/syslog on macOS).
+    Falls back silently if syslog is not available so the app still starts.
+    """
+    level = logging.DEBUG if app.debug else logging.INFO
+    fmt = logging.Formatter("leash %(name)s %(levelname)s: %(message)s")
+
+    for addr in ("/dev/log", "/var/run/syslog"):
+        try:
+            handler = logging.handlers.SysLogHandler(
+                address=addr,
+                facility=logging.handlers.SysLogHandler.LOG_LOCAL0,
+            )
+            handler.setFormatter(fmt)
+            handler.setLevel(level)
+
+            leash_log = logging.getLogger("leash")
+            leash_log.setLevel(level)
+            # Avoid double-adding on reloads (e.g. Flask debug reloader)
+            if not any(isinstance(h, logging.handlers.SysLogHandler) for h in leash_log.handlers):
+                leash_log.addHandler(handler)
+
+            app.logger.info("Leash: syslog handler attached (%s, LOCAL0)", addr)
+            return
+        except OSError:
+            continue
+
+    app.logger.warning("Leash: syslog socket not found — audit events will not go to syslog")
 
 
 def _auto_migrate(app: Flask) -> None:
@@ -68,6 +101,8 @@ def create_app(config_name: str = "default") -> Flask:
     app.register_blueprint(layouts_api_bp, url_prefix="/api")
     app.register_blueprint(snapshots_api_bp, url_prefix="/api")
     app.register_blueprint(v1_bp, url_prefix="/api/v1")
+
+    _configure_syslog(app)
 
     with app.app_context():
         _auto_migrate(app)
