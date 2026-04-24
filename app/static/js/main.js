@@ -306,6 +306,6 @@ window.Leash = (() => {
   return {
     toast, pollReceiver, bulkReload, scanNetwork,
     discoverSources, setSource, rebootReceiver, restartReceiver,
-    removeReceiver, updateReceiverCard,
+    removeReceiver,
   };
 })();

@@ -15,13 +15,10 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 
 from app import db
-from app.models import Layout, LayoutPosition, NDIReceiver
+from app.models import Layout, LayoutPosition
+from app.routes._helpers import err as _err
 
 layouts_api_bp = Blueprint("layouts_api", __name__)
-
-
-def _err(msg, code=400):
-    return jsonify({"error": msg}), code
 
 
 @layouts_api_bp.route("/layouts", methods=["GET"])

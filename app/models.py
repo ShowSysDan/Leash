@@ -50,6 +50,11 @@ class NDIReceiver(db.Model):
         prefix = current_app.config.get("NDI_SUBNET_PREFIX", "10.1.248.")
         return f"{prefix}{self.ip_last_octet}"
 
+    @property
+    def display_name(self) -> str:
+        """Best human-friendly identifier: label > hostname > IP octet."""
+        return self.label or self.hostname or self.ip_last_octet
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,

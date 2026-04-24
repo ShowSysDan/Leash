@@ -17,14 +17,11 @@ from flask import Blueprint, current_app, jsonify, request
 
 from app import db
 from app.models import NDIReceiver, ReceiverGroup
+from app.routes._helpers import err as _err
 from app.services.audit_log import device_error, group_source_sent, source_changed, source_change_failed
-from app.services.birddog_client import BirdDogClient, run_async
+from app.services.birddog_client import client_from_receiver, run_async
 
 groups_api_bp = Blueprint("groups_api", __name__)
-
-
-def _err(msg, code=400):
-    return jsonify({"error": msg}), code
 
 
 @groups_api_bp.route("/groups", methods=["GET"])
@@ -128,12 +125,7 @@ def set_group_source(group_id: int):
 
     async def _apply_all():
         async def _one(recv):
-            client = BirdDogClient(
-                ip=recv.ip_address,
-                port=cfg["NDI_DEVICE_PORT"],
-                password=cfg["NDI_DEVICE_PASSWORD"],
-                timeout=cfg["HTTP_TIMEOUT"],
-            )
+            client = client_from_receiver(recv, cfg)
             code, data = await client.set_connect_to(source_name)
             return {"receiver_id": recv.id, "status": code, "ok": code == 200}
 
@@ -152,14 +144,14 @@ def set_group_source(group_id: int):
             recv.current_source = source_name
             recv.updated_at = now
             source_changed(
-                recv.label or recv.hostname or recv.ip_last_octet,
+                recv.display_name,
                 recv.ip_address, old_source, source_name, via=f"group:{group.name}",
             )
         else:
             http_status = next((r["status"] for r in results if r["receiver_id"] == recv.id), 0)
             device_error(recv.ip_address, "group_set_source", http_status)
             source_change_failed(
-                recv.label or recv.hostname or recv.ip_last_octet,
+                recv.display_name,
                 recv.ip_address, source_name, http_status, via=f"group:{group.name}",
             )
     db.session.commit()

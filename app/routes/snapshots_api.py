@@ -17,14 +17,11 @@ from flask import Blueprint, current_app, jsonify, request
 
 from app import db
 from app.models import NDIReceiver, Snapshot, SnapshotEntry
+from app.routes._helpers import err as _err
 from app.services.audit_log import device_error, snapshot_recalled, snapshot_source_changed
-from app.services.birddog_client import BirdDogClient, run_async
+from app.services.birddog_client import client_from_receiver, run_async
 
 snapshots_api_bp = Blueprint("snapshots_api", __name__)
-
-
-def _err(msg, code=400):
-    return jsonify({"error": msg}), code
 
 
 @snapshots_api_bp.route("/snapshots", methods=["GET"])
@@ -98,12 +95,7 @@ def recall_snapshot(snap_id: int):
     async def _recall_all():
         async def _one(entry):
             recv = entry.receiver
-            client = BirdDogClient(
-                ip=recv.ip_address,
-                port=cfg["NDI_DEVICE_PORT"],
-                password=cfg["NDI_DEVICE_PASSWORD"],
-                timeout=cfg["HTTP_TIMEOUT"],
-            )
+            client = client_from_receiver(recv, cfg)
             code, _ = await client.set_connect_to(entry.source_name)
             return {
                 "receiver_id": recv.id,
@@ -128,7 +120,7 @@ def recall_snapshot(snap_id: int):
         recv.current_source = ok_map[recv.id]
         recv.updated_at = now
         snapshot_source_changed(
-            recv.label or recv.hostname or recv.ip_last_octet,
+            recv.display_name,
             recv.ip_address, old_source, ok_map[recv.id], snap.name,
         )
     for recv_id, result in failed_map.items():

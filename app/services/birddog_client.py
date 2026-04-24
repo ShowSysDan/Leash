@@ -172,9 +172,6 @@ class BirdDogClient:
     async def get_decode_status(self) -> tuple[int, Any]:
         return await self._get("/decodestatus")
 
-    async def capture(self) -> tuple[int, Any]:
-        return await self._get("/capture")
-
     # -------------------------------------------------------------------------
     # NDI Finder
     # -------------------------------------------------------------------------
@@ -184,9 +181,6 @@ class BirdDogClient:
 
     async def reset_ndi(self) -> tuple[int, Any]:
         return await self._get("/reset")
-
-    async def refresh_ndi(self) -> tuple[int, Any]:
-        return await self._get("/refresh")
 
     async def get_ndi_discovery_server(self) -> tuple[int, Any]:
         return await self._get("/NDIDisServer")
@@ -215,12 +209,6 @@ class BirdDogClient:
 
     async def set_ptz_setup(self, data: dict) -> tuple[int, Any]:
         return await self._post("/birddogptzsetup", data)
-
-    async def recall_preset(self, preset: str) -> tuple[int, Any]:
-        return await self._post("/recall", {"Preset": preset})
-
-    async def save_preset(self, preset: str) -> tuple[int, Any]:
-        return await self._post("/save", {"Preset": preset})
 
     # -------------------------------------------------------------------------
     # Camera image settings
@@ -334,6 +322,37 @@ def _try_json(text: str) -> Any:
         return json.loads(text)
     except (json.JSONDecodeError, TypeError):
         return text.strip() if isinstance(text, str) else text
+
+
+# ---------------------------------------------------------------------------
+# Construction helpers (replace repeated constructor blocks across routes)
+# ---------------------------------------------------------------------------
+
+def client_config(app_config) -> dict:
+    """Extract the BirdDog-related config keys into a plain dict usable by
+    the bulk helpers.  Replaces several hand-built cfg_dict blocks."""
+    return {
+        "NDI_SUBNET_PREFIX": app_config["NDI_SUBNET_PREFIX"],
+        "NDI_DEVICE_PORT": app_config["NDI_DEVICE_PORT"],
+        "NDI_DEVICE_PASSWORD": app_config["NDI_DEVICE_PASSWORD"],
+        "HTTP_TIMEOUT": app_config["HTTP_TIMEOUT"],
+        "RECALL_CONCURRENCY": app_config.get("RECALL_CONCURRENCY", 10),
+    }
+
+
+def client_from_ip(ip: str, app_config) -> "BirdDogClient":
+    """Build a BirdDogClient for a raw IP string using Flask app config."""
+    return BirdDogClient(
+        ip=ip,
+        port=app_config["NDI_DEVICE_PORT"],
+        password=app_config["NDI_DEVICE_PASSWORD"],
+        timeout=app_config["HTTP_TIMEOUT"],
+    )
+
+
+def client_from_receiver(receiver, app_config) -> "BirdDogClient":
+    """Build a BirdDogClient for a receiver object (uses receiver.ip_address)."""
+    return client_from_ip(receiver.ip_address, app_config)
 
 
 # ---------------------------------------------------------------------------

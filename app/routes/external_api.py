@@ -36,7 +36,7 @@ from flask import Blueprint, current_app, jsonify, request
 from app import db
 from app.models import NDIReceiver, NDISource
 from app.services.audit_log import device_error, source_change_failed, source_changed
-from app.services.birddog_client import BirdDogClient, run_async
+from app.services.birddog_client import client_from_ip, run_async
 
 v1_bp = Blueprint("v1", __name__)
 logger = logging.getLogger(__name__)
@@ -175,18 +175,11 @@ def _resolve_source(value) -> tuple[str | None, str | None]:
 
 def _do_route(ip_octet: str, source_name: str, cfg: dict) -> dict:
     """Synchronously route one receiver.  Returns result dict."""
-    prefix = cfg["NDI_SUBNET_PREFIX"]
-    ip = f"{prefix}{ip_octet}"
-    client = BirdDogClient(
-        ip=ip,
-        port=cfg["NDI_DEVICE_PORT"],
-        password=cfg["NDI_DEVICE_PASSWORD"],
-        timeout=cfg["HTTP_TIMEOUT"],
-    )
-    code, data = run_async(client.set_connect_to(source_name))
+    ip = f"{cfg['NDI_SUBNET_PREFIX']}{ip_octet}"
+    code, data = run_async(client_from_ip(ip, cfg).set_connect_to(source_name))
     ok = code == 200
     recv = NDIReceiver.query.filter_by(ip_last_octet=str(ip_octet)).first()
-    label = (recv.label or recv.hostname or ip_octet) if recv else ip_octet
+    label = recv.display_name if recv else ip_octet
     if ok:
         if recv:
             old_source = recv.current_source
@@ -275,13 +268,7 @@ def route_bulk():
 
         async def _one(octet, source_name):
             ip = f"{prefix}{octet}"
-            client = BirdDogClient(
-                ip=ip,
-                port=cfg["NDI_DEVICE_PORT"],
-                password=cfg["NDI_DEVICE_PASSWORD"],
-                timeout=cfg["HTTP_TIMEOUT"],
-            )
-            code, _ = await client.set_connect_to(source_name)
+            code, _ = await client_from_ip(ip, cfg).set_connect_to(source_name)
             return {
                 "ip_octet": octet,
                 "ip_address": ip,
@@ -299,7 +286,7 @@ def route_bulk():
     now = datetime.utcnow()
     for r in results:
         recv = NDIReceiver.query.filter_by(ip_last_octet=r["ip_octet"]).first()
-        label = (recv.label or recv.hostname or r["ip_octet"]) if recv else r["ip_octet"]
+        label = recv.display_name if recv else r["ip_octet"]
         if r["ok"]:
             if recv:
                 old_source = recv.current_source
