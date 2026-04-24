@@ -1,6 +1,8 @@
 [Unit]
-Description=Leash NDI Receiver Control
+Description=Leash NDI Source Control
 After=network.target
+# Restart indefinitely — don't give up after hitting the burst limit
+StartLimitAction=none
 
 [Service]
 # Run as the user who owns ~/Leash
@@ -9,17 +11,25 @@ Group=%i
 WorkingDirectory=%h/Leash
 EnvironmentFile=%h/Leash/.env
 
-# Activate the venv and run Gunicorn
+# Single worker + threads so the background scheduler fires exactly once.
+# --threads 4 handles concurrent HTTP requests without multiple processes.
 ExecStart=%h/Leash/venv/bin/gunicorn \
-    --workers 2 \
+    --workers 1 \
+    --threads 4 \
     --bind 0.0.0.0:5000 \
     --timeout 120 \
     --access-logfile - \
     --error-logfile - \
     run:app
 
-Restart=on-failure
-RestartSec=5s
+# Restart on any exit (crash, OOM, or even clean exit)
+Restart=always
+RestartSec=10s
+
+# Allow up to 10 restarts in a 5-minute window before slowing down.
+# StartLimitAction=none above means systemd keeps retrying indefinitely.
+StartLimitIntervalSec=300
+StartLimitBurst=10
 
 [Install]
 WantedBy=multi-user.target

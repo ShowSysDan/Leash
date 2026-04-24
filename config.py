@@ -16,6 +16,12 @@ class Config:
     # Async request timeout (seconds)
     HTTP_TIMEOUT = int(os.environ.get("HTTP_TIMEOUT", 5))
 
+    # Max concurrent BirdDog HTTP calls during scheduled recalls / bulk ops
+    RECALL_CONCURRENCY = int(os.environ.get("RECALL_CONCURRENCY", 10))
+
+    # How often (seconds) the enforcement poller checks active persistence windows
+    ENFORCEMENT_INTERVAL = int(os.environ.get("ENFORCEMENT_INTERVAL", 60))
+
     # External API key — leave unset to disable auth (open network only)
     API_KEY = os.environ.get("API_KEY") or None
 

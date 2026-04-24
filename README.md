@@ -1,29 +1,28 @@
-# Leash — NDI Receiver Control
+# Leash — NDI Source Control
 
-Flask/Python application for managing and controlling a network of BirdDog NDI
-receivers (replacing a QSYS Lua script).  Supports up to 83 receivers on a
-shared subnet, with SQLite for development and PostgreSQL for production.
+Flask/Python application that centrally controls a network of **BirdDog NDI PLAY** receivers.
+Replaces a QSYS Lua script as the single routing control point for up to 254 receivers on a shared subnet.
+SQLite for development, PostgreSQL-ready for production.
+
+Current version: **1.0.0**
 
 ---
 
 ## Features
 
-- **Auto-scan** — concurrently probes all 254 addresses on the subnet and
-  auto-detects BirdDog PLAY devices via `/about`.  Hostname, firmware version,
-  serial number, and network info are captured on first contact and cached.
-- **Dashboard** — grid view of all receivers showing live hostname, current NDI
-  source, and online/offline status.  Offline devices are dimmed and can be
-  removed with one click.
-- **Source caching** — NDI sources are **stored in the database** so they
-  remain available across sessions without re-running discovery.
-- **Bulk reload** — concurrently polls all known receivers in parallel
-  (asyncio + aiohttp).  Marks any that don't respond as offline.
-- **Source discovery** — triggers `/reset` + `/List` on a reference device and
-  merges results into the DB, preserving previously-seen sources.
-- **Per-receiver settings** — tabbed settings page covering Decode, Transport,
-  Audio, PTZ, Picture, Exposure, White Balance, Gamma, and more.
-- **Full BirdDog REST API v2.0 coverage** — every documented endpoint is
-  wrapped in `BirdDogClient`.
+| Feature | Summary |
+|---|---|
+| **Auto-scan** | Probes the full subnet concurrently, identifies BirdDog PLAY devices via `/about`, auto-creates receiver records |
+| **Dashboard** | Grid of all receivers — live status, hostname, current source, inline source selector |
+| **Source registry** | NDI sources persist in the DB with a **stable index** that never changes, even when a source goes offline |
+| **Groups** | Tag receivers into named groups; send one source to all members at once |
+| **Layouts** | Drag-and-drop spatial canvas pages that mirror your physical room floor plan |
+| **Snapshots** | Save and one-click recall full routing state across all devices |
+| **Schedules** | Cron-like automation — recall a snapshot on selected days at a set time |
+| **Persistent enforcement** | After a scheduled recall, poll receivers and correct any source drift for a configurable window |
+| **External API** | `/api/v1/` for QSYS, Crestron, AMX — route by stable index or source name |
+| **Syslog audit log** | Every source change, discovery, scan, and device error written to syslog |
+| **Auto-migrations** | DB schema is always current on startup — no manual migration commands needed |
 
 ---
 
@@ -32,36 +31,59 @@ shared subnet, with SQLite for development and PostgreSQL for production.
 ```
 Leash/
 ├── app/
-│   ├── __init__.py          # Flask app factory
-│   ├── models.py            # SQLAlchemy models (NDIReceiver, NDISource)
+│   ├── __init__.py              # App factory — migrations, syslog, scheduler
+│   ├── __version__.py           # Version string
+│   ├── models.py                # All SQLAlchemy models
 │   ├── routes/
-│   │   ├── main.py          # HTML page routes
-│   │   └── api.py           # JSON REST API
+│   │   ├── main.py              # HTML page routes
+│   │   ├── api.py               # Internal REST API (/api/)
+│   │   ├── groups_api.py        # Groups API
+│   │   ├── layouts_api.py       # Layouts API
+│   │   ├── snapshots_api.py     # Snapshots API
+│   │   ├── schedules_api.py     # Schedules API
+│   │   └── external_api.py      # External integration API (/api/v1/)
 │   ├── services/
-│   │   └── birddog_client.py  # Async BirdDog HTTP client
+│   │   ├── birddog_client.py    # Async BirdDog REST client (full v2.0 coverage)
+│   │   ├── scanner.py           # Subnet scanner
+│   │   ├── scheduler.py         # APScheduler — recalls + enforcement
+│   │   └── audit_log.py         # Structured syslog helpers
 │   ├── static/
 │   │   ├── css/style.css
-│   │   └── js/main.js       # Dashboard JS
-│   │   └── js/receiver_detail.js
+│   │   └── js/
+│   │       ├── main.js          # Shared: toast, scan, discover, reload
+│   │       ├── groups.js
+│   │       ├── layout.js
+│   │       ├── snapshots.js
+│   │       ├── schedules.js
+│   │       └── receiver_detail.js
 │   └── templates/
 │       ├── base.html
-│       ├── index.html       # Receiver dashboard
+│       ├── index.html
 │       ├── receiver_detail.html
+│       ├── groups.html
+│       ├── layouts.html
+│       ├── layout_view.html
+│       ├── snapshots.html
+│       ├── schedules.html
 │       ├── sources.html
 │       └── partials/
-├── migrations/              # Flask-Migrate / Alembic
-├── config.py                # Dev / Production config
-├── run.py                   # Dev entry point
+├── docs/
+│   └── qsys_integration.lua     # Sample QSYS Lua integration script
+├── migrations/                  # Alembic migration files (auto-managed)
+├── config.py                    # Dev / Production config classes
+├── run.py                       # Dev entry point
 ├── requirements.txt
-├── leash.service            # systemd service template
-└── .env.example
+├── leash.service                # systemd service template
+├── .env.example
+├── CHANGELOG.md
+└── README.md
 ```
 
 ---
 
 ## Quick Start (Development)
 
-### 1. Clone & set up virtualenv
+### 1. Clone and create a virtualenv
 
 ```bash
 cd ~
@@ -70,11 +92,10 @@ cd Leash
 
 python3 -m venv venv
 source venv/bin/activate
-
 pip install -r requirements.txt
 ```
 
-### 2. Configure environment
+### 2. Configure
 
 ```bash
 cp .env.example .env
@@ -82,49 +103,33 @@ cp .env.example .env
 # Leave DATABASE_URL commented out to use SQLite
 ```
 
-### 3. Initialise the database
-
-```bash
-source venv/bin/activate
-export FLASK_APP=run.py
-flask db init        # only needed once
-flask db migrate -m "initial"
-flask db upgrade
-```
-
-### 4. Run development server
+### 3. Run
 
 ```bash
 python run.py
 ```
 
-Open `http://localhost:5000` in your browser.
+Open `http://localhost:5000`.
+
+> **No manual DB setup needed.** On first run, Leash automatically initialises
+> the migrations directory, generates the initial schema migration, and applies
+> it.  On subsequent runs it only applies pending migrations.
 
 ---
 
-## Running as a systemd Service (Production)
+## Production Deployment (systemd)
 
-### 1. Prepare the environment
+### 1. Prepare
 
 ```bash
 cd ~/Leash
 cp .env.example .env
-# Edit .env: set FLASK_ENV=production, DATABASE_URL, SECRET_KEY
-
-source venv/bin/activate
-export FLASK_APP=run.py
-flask db upgrade
-deactivate
+# Set FLASK_ENV=production, DATABASE_URL (PostgreSQL), and SECRET_KEY
 ```
 
 ### 2. Install the service
 
-The service file uses `%i` (instance name) and `%h` (home directory)
-specifiers, so the service must be installed as a user service **or** with the
-instance name set to your username.
-
 ```bash
-# Copy to systemd user services
 mkdir -p ~/.config/systemd/user
 cp ~/Leash/leash.service ~/.config/systemd/user/leash.service
 
@@ -134,90 +139,126 @@ systemctl --user start leash
 systemctl --user status leash
 ```
 
-To start automatically at boot without needing to log in:
+To start automatically at boot without a login session:
 
 ```bash
 sudo loginctl enable-linger $USER
 ```
 
-### 3. Check logs
+### 3. Logs
 
 ```bash
+# Service logs (stdout/stderr from gunicorn)
 journalctl --user -u leash -f
+
+# Audit log (source changes, discovery events, errors)
+journalctl -t leash -f
+# or
+grep 'leash' /var/log/syslog | tail -50
 ```
 
----
+### Gunicorn worker note
 
-## Switching to PostgreSQL
-
-1. Install PostgreSQL and create a database:
-
-   ```bash
-   sudo -u postgres psql
-   CREATE USER leash WITH PASSWORD 'your-password';
-   CREATE DATABASE leash OWNER leash;
-   \q
-   ```
-
-2. Update `.env`:
-
-   ```
-   DATABASE_URL=postgresql://leash:your-password@localhost/leash
-   ```
-
-3. Run migrations:
-
-   ```bash
-   source venv/bin/activate
-   export FLASK_APP=run.py
-   flask db upgrade
-   ```
-
-`psycopg2-binary` is already in `requirements.txt`.
+The service runs `--workers 1 --threads 4`.  **Do not increase workers.**
+The background scheduler (APScheduler) lives inside the worker process —
+multiple workers would fire every scheduled recall N times and run N
+parallel enforcement pollers.  Threads handle HTTP concurrency instead.
 
 ---
 
-## Auto-Scan Workflow
+## PostgreSQL
 
-1. Click **Scan Network** in the toolbar (or `POST /api/scan`).
-2. Leash concurrently probes `10.1.248.1` → `10.1.248.254` (configurable range).
-3. Any device whose `/about` response contains `"HardwareVersion": "BirdDog PLAY"` is upserted.
-4. Hostname, firmware, serial, and network info are cached immediately.
-5. Any receiver already in the DB that **didn't** respond is marked **offline**.
-6. Offline receivers can be removed individually via the trash button, or will
-   reappear as online on the next scan if they come back.
+```bash
+sudo -u postgres psql
+CREATE USER leash WITH PASSWORD 'your-password';
+CREATE DATABASE leash OWNER leash;
+\q
+```
 
-Polling (`Reload All`) refreshes `/hostname` and `/connectTo` on every known
-receiver, keeping hostnames current even after a player moves to a new location.
+Update `.env`:
+
+```
+DATABASE_URL=postgresql://leash:your-password@localhost/leash
+```
+
+`psycopg2-binary` is already in `requirements.txt`.  Auto-migration handles
+the schema on first startup.
+
+---
+
+## Environment Variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `FLASK_ENV` | `development` | `development` or `production` |
+| `SECRET_KEY` | insecure default | Flask session secret — **change in production** |
+| `DATABASE_URL` | SQLite in project dir | Full database URI |
+| `NDI_SUBNET_PREFIX` | `10.1.248.` | Fixed IP prefix for all receivers |
+| `NDI_DEVICE_PORT` | `8080` | BirdDog HTTP API port |
+| `NDI_DEVICE_PASSWORD` | `birddog` | BirdDog device password |
+| `HTTP_TIMEOUT` | `5` | Per-device request timeout (seconds) |
+| `RECALL_CONCURRENCY` | `10` | Max simultaneous device contacts during recalls and enforcement corrections |
+| `ENFORCEMENT_INTERVAL` | `60` | How often (seconds) the enforcement poller checks active persistence windows |
+| `API_KEY` | _(unset)_ | External API key for `/api/v1/`; leave unset for open LAN access |
+
+---
+
+## Scheduled Recalls and Persistent Enforcement
+
+Schedules are managed at **Schedules** in the navbar.
+
+1. Create a schedule: pick a snapshot, select days, set a time (local server time, 24-hour).
+2. Enable **Persistent enforcement** and set a window (e.g. 60 minutes).
+
+When a persistent schedule fires:
+
+- The snapshot is recalled immediately (receivers batched at `RECALL_CONCURRENCY` at a time).
+- `enforcing_until` is set to `now + window`.
+- Every `ENFORCEMENT_INTERVAL` seconds, Leash polls every receiver in the snapshot
+  via a lightweight `/connectTo` call and corrects any source drift.
+- Receivers that were **offline** when the schedule fired are corrected automatically
+  when they come back online during the window.
+- **Multiple overlapping windows** on the same receiver: most-recently-fired schedule wins.
+- Click **Stop** in the table or call `DELETE /api/schedules/<id>/enforcement` to end early.
+
+Tune `RECALL_CONCURRENCY` and `ENFORCEMENT_INTERVAL` in `.env` to match your network size.
 
 ---
 
 ## API Reference
 
-### Scan
+### Internal API (`/api/`)
+
+#### Version
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/scan` | Scan subnet, upsert found BirdDog PLAY devices, mark missing as offline |
+|---|---|---|
+| GET | `/api/version` | Returns `{"version": "1.0.0"}` |
 
-Body (optional): `{"start": 1, "end": 254}` to limit scan range.
-
-### Receivers
+#### Subnet Scan
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/receivers` | List all receivers |
-| POST | `/api/receivers` | Add a receiver `{"index":1,"ip_last_octet":"168","label":"..."}` |
-| GET | `/api/receivers/<id>` | Get one receiver |
+|---|---|---|
+| POST | `/api/scan` | Scan subnet; upsert found BirdDog PLAY devices; mark missing offline |
+
+Body (optional): `{"start": 1, "end": 254}`
+
+#### Receivers
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/receivers` | List all |
+| POST | `/api/receivers` | Add `{"ip_last_octet":"83","label":"..."}` |
+| GET | `/api/receivers/<id>` | Get one |
 | PUT | `/api/receivers/<id>` | Update label / IP octet |
-| DELETE | `/api/receivers/<id>` | Remove receiver |
-| GET | `/api/receivers/bulk-reload` | Concurrent status refresh for all receivers |
+| DELETE | `/api/receivers/<id>` | Remove |
+| GET | `/api/receivers/bulk-reload` | Concurrent status refresh for all |
 | GET | `/api/receivers/<id>/status` | Poll live status from device |
 | POST | `/api/receivers/<id>/source` | Set NDI source `{"source_name":"..."}` |
 | POST | `/api/receivers/<id>/reboot` | Reboot device |
 | POST | `/api/receivers/<id>/restart` | Restart video subsystem |
-| GET | `/api/receivers/<id>/settings/<group>` | Get settings group |
-| POST | `/api/receivers/<id>/settings/<group>` | Apply settings group |
+| GET | `/api/receivers/<id>/settings/<group>` | Read a settings group |
+| POST | `/api/receivers/<id>/settings/<group>` | Write a settings group |
 
 **Settings groups:** `decode_setup`, `decode_transport`, `decode_status`,
 `encode_setup`, `encode_transport`, `analog_audio`, `operation_mode`,
@@ -225,33 +266,158 @@ Body (optional): `{"start": 1, "end": 254}` to limit scan range.
 `advanced`, `external`, `detail`, `gamma`, `sil2_codec`, `sil2_enc`,
 `ndi_discovery`, `ndi_group`, `ndi_offsubnet`
 
-### Sources
+#### Sources
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/sources` | List cached sources |
-| POST | `/api/sources/discover` | Run `/reset` + `/List` and cache results |
-| DELETE | `/api/sources/<id>` | Remove a cached source |
+|---|---|---|
+| GET | `/api/sources` | List all cached sources |
+| POST | `/api/sources/discover` | Run discovery on a reference device and merge results |
+| DELETE | `/api/sources/<id>` | Remove a source from the registry |
+
+#### Groups
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/groups` | List all groups |
+| POST | `/api/groups` | Create `{"name":"...","color":"#hex","description":"..."}` |
+| GET | `/api/groups/<id>` | Get group with members |
+| PUT | `/api/groups/<id>` | Update name / color / description |
+| DELETE | `/api/groups/<id>` | Delete group |
+| POST | `/api/groups/<id>/receivers` | Add members `{"receiver_ids":[1,2]}` |
+| DELETE | `/api/groups/<id>/receivers` | Remove members `{"receiver_ids":[1,2]}` |
+| POST | `/api/groups/<id>/source` | Send source to all online members `{"source_name":"..."}` |
+
+#### Layouts
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/layouts` | List all layouts |
+| POST | `/api/layouts` | Create `{"name":"...","bg_color":"#hex"}` |
+| GET | `/api/layouts/<id>` | Get layout with positions |
+| DELETE | `/api/layouts/<id>` | Delete layout |
+| PUT | `/api/layouts/<id>/positions` | Replace all positions `[{"receiver_id":1,"x_pct":10,"y_pct":20},...]` |
+| POST | `/api/layouts/<id>/receivers` | Add receiver to layout |
+| DELETE | `/api/layouts/<id>/receivers/<receiver_id>` | Remove receiver from layout |
+
+#### Snapshots
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/snapshots` | List all |
+| POST | `/api/snapshots` | Capture `{"name":"...","receiver_ids":[...]}` (omit ids for all) |
+| GET | `/api/snapshots/<id>` | Get with entries |
+| POST | `/api/snapshots/<id>/recall` | Recall to all (or subset) `{"receiver_ids":[...]}` |
+| DELETE | `/api/snapshots/<id>` | Delete |
+
+#### Schedules
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/schedules` | List all |
+| POST | `/api/schedules` | Create (see body below) |
+| GET | `/api/schedules/<id>` | Get one |
+| PUT | `/api/schedules/<id>` | Update |
+| DELETE | `/api/schedules/<id>` | Delete |
+| PATCH | `/api/schedules/<id>/toggle` | Flip enabled flag |
+| DELETE | `/api/schedules/<id>/enforcement` | Stop an active enforcement window early |
+
+Schedule body:
+
+```json
+{
+  "name": "Morning show",
+  "snapshot_id": 3,
+  "days_of_week": "0,1,2,3,4",
+  "time_of_day": "08:30",
+  "enabled": true,
+  "persistent": true,
+  "persist_minutes": 60
+}
+```
+
+`days_of_week`: comma-separated integers, 0 = Monday … 6 = Sunday.
+`time_of_day`: HH:MM, **local server time**, 24-hour.
 
 ---
 
-## BirdDog Device Firmware Notes
+### External Integration API (`/api/v1/`)
+
+Designed for QSYS, Crestron, AMX, or any HTTP client.
+
+**Authentication:** If `API_KEY` is set in `.env`, include it as:
+- Header: `X-API-Key: <key>`
+- Query string: `?api_key=<key>`
+
+Leave `API_KEY` unset for unauthenticated access on a trusted LAN.
+
+#### Sources
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/v1/sources` | All sources — online and offline — with stable indexes |
+| GET | `/api/v1/sources/online` | Currently-visible sources only |
+| GET | `/api/v1/sources/<index>` | Look up by stable index |
+
+#### Receivers
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/v1/receivers` | All receivers with current source and source index |
+| GET | `/api/v1/receivers/<octet>` | One receiver by IP last octet |
+
+#### Routing
+
+| Method | Endpoint | Body | Description |
+|---|---|---|---|
+| POST | `/api/v1/route` | `{"ip_octet":"83","source":4}` | Route one receiver |
+| POST | `/api/v1/route/bulk` | `[{"ip_octet":"83","source":4},...]` | Route many concurrently |
+
+`source` can be a **stable integer index** or a **source name string**.
+
+Sample QSYS Lua script: `docs/qsys_integration.lua`
+
+---
+
+## Syslog Audit Log
+
+All operational events are written to syslog (LOCAL0 facility, program tag `leash`).
+The socket is auto-detected: `/dev/log` (Linux) or `/var/run/syslog` (macOS).
+
+Log levels:
+
+| Level | Events |
+|---|---|
+| INFO | Source routed successfully, scan complete, new receiver found, NDI source discovered, snapshot recalled, group send, schedule fired |
+| WARNING | Source change failed (device rejected), receiver went offline, source went offline, enforcement drift detected |
+| ERROR | Device communication failure (timeout, non-200 response) |
+
+Each source-change entry includes a `via=` tag:
+
+| Tag | Origin |
+|---|---|
+| `ui` | Receiver dashboard or detail page |
+| `group:<name>` | Group bulk send |
+| `snapshot:<name>` | Snapshot recall |
+| `v1` | External API single route |
+| `v1_bulk` | External API bulk route |
+| `enforcement` | Persistent enforcement correction |
+
+Filter Leash audit events:
+
+```bash
+journalctl -t leash -f
+grep 'leash.audit' /var/log/syslog
+```
+
+---
+
+## BirdDog Firmware Notes
 
 Some older BirdDog firmware uses different endpoint capitalisation
-(e.g. `/ConnectTo` vs `/connectTo`, `/HostName` vs `/hostname`).  If a device
-returns 404 on standard paths, instantiate `BirdDogClient` with
+(`/ConnectTo` instead of `/connectTo`, `/HostName` instead of `/hostname`).
+If a device returns 404 on standard paths, instantiate `BirdDogClient` with
 `legacy_paths=True`.
 
----
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `FLASK_ENV` | `development` | `development` or `production` |
-| `SECRET_KEY` | (insecure default) | Flask session secret — **change in production** |
-| `DATABASE_URL` | SQLite in project dir | Full DB URI |
-| `NDI_SUBNET_PREFIX` | `10.1.248.` | Fixed IP prefix for all receivers |
-| `NDI_DEVICE_PORT` | `8080` | BirdDog HTTP API port |
-| `NDI_DEVICE_PASSWORD` | `birddog` | BirdDog device password |
-| `HTTP_TIMEOUT` | `5` | Per-request timeout in seconds |
+The subnet scanner identifies devices as BirdDog PLAY by checking that the
+`HardwareVersion` field in the `/about` response contains `"BirdDog PLAY"`.
+Other BirdDog models (encoders, PTZ cameras) are ignored by the scanner.
