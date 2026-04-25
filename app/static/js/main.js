@@ -291,6 +291,25 @@ window.Leash = (() => {
           data.status === 200 ? 'warning' : 'danger');
   }
 
+  async function rebootAll() {
+    const btn = document.getElementById('btn-reboot-all-confirm');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Rebooting…'; }
+    try {
+      const resp = await fetch('/api/receivers/bulk-reboot', { method: 'POST' });
+      const data = await resp.json();
+      bootstrap.Modal.getInstance(document.getElementById('rebootAllModal'))?.hide();
+      if (resp.ok) {
+        const msg = `Reboot sent to ${data.rebooted} decoder(s)` +
+                    (data.failed ? ` — ${data.failed} failed` : '');
+        toast(msg, data.failed ? 'warning' : 'success');
+      } else {
+        toast('Bulk reboot failed', 'danger');
+      }
+    } finally {
+      if (btn) { btn.disabled = false; btn.innerHTML = '<i class="bi bi-power me-1"></i>Reboot All'; }
+    }
+  }
+
   async function restartReceiver(receiverId) {
     const resp = await fetch(`/api/receivers/${receiverId}/restart`, { method: 'POST' });
     const data = await resp.json();
@@ -342,6 +361,9 @@ window.Leash = (() => {
     document.getElementById('btn-bulk-reload')?.addEventListener('click', bulkReload);
     document.getElementById('btn-discover')?.addEventListener('click', discoverSources);
     document.getElementById('btn-add-receiver')?.addEventListener('click', addReceiver);
+    document.getElementById('btn-reboot-all')?.addEventListener('click', () =>
+      new bootstrap.Modal(document.getElementById('rebootAllModal')).show());
+    document.getElementById('btn-reboot-all-confirm')?.addEventListener('click', rebootAll);
 
     document.querySelectorAll('.source-select').forEach(sel => {
       sel.addEventListener('change', () => {
@@ -363,7 +385,7 @@ window.Leash = (() => {
 
   return {
     toast, pollReceiver, bulkReload, scanNetwork,
-    discoverSources, setSource, rebootReceiver, restartReceiver,
+    discoverSources, setSource, rebootReceiver, rebootAll, restartReceiver,
     removeReceiver,
   };
 })();

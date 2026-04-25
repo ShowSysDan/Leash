@@ -9,6 +9,7 @@ Receiver endpoints
   DELETE /api/receivers/<id>              delete
   POST   /api/receivers/<id>/source       set NDI source
   POST   /api/receivers/<id>/reboot       reboot device
+  POST   /api/receivers/bulk-reboot       reboot all online devices
   POST   /api/receivers/<id>/restart      restart video subsystem
   GET    /api/receivers/<id>/status       poll live status from device
   GET    /api/receivers/bulk-reload       refresh status for every receiver
@@ -314,6 +315,48 @@ def reboot_receiver(receiver_id: int):
     receiver = NDIReceiver.query.get_or_404(receiver_id)
     code, data = run_async(client_from_receiver(receiver, current_app.config).reboot())
     return jsonify({"status": code, "response": data})
+
+
+@api_bp.route("/receivers/bulk-reboot", methods=["POST"])
+def bulk_reboot():
+    """Reboot every online receiver concurrently."""
+    import asyncio
+    import aiohttp
+    from app.services.birddog_client import BirdDogClient
+
+    cfg = current_app.config
+    receivers = NDIReceiver.query.filter_by(status="online").order_by(NDIReceiver.index).all()
+    if not receivers:
+        return jsonify({"rebooted": 0, "failed": 0, "results": []})
+
+    concurrency = cfg.get("RECALL_CONCURRENCY", 10)
+    prefix   = cfg["NDI_SUBNET_PREFIX"]
+    port     = cfg["NDI_DEVICE_PORT"]
+    password = cfg["NDI_DEVICE_PASSWORD"]
+    timeout  = cfg["HTTP_TIMEOUT"]
+
+    async def _reboot_all():
+        sem = asyncio.Semaphore(concurrency)
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=timeout)
+        ) as session:
+            async def _one(recv):
+                async with sem:
+                    client = BirdDogClient(
+                        recv.ip_address, port=port, password=password,
+                        timeout=timeout, session=session,
+                    )
+                    code, _ = await client.reboot()
+                    return {"id": recv.id, "ip": recv.ip_address,
+                            "name": recv.display_name, "ok": code == 200, "status": code}
+            return await asyncio.gather(*[_one(r) for r in receivers], return_exceptions=False)
+
+    results = run_async(_reboot_all())
+    ok_count = sum(1 for r in results if r["ok"])
+    failed_count = len(results) - ok_count
+
+    logger.info("Bulk reboot: %d/%d receivers responded OK", ok_count, len(receivers))
+    return jsonify({"rebooted": ok_count, "failed": failed_count, "results": results})
 
 
 @api_bp.route("/receivers/<int:receiver_id>/restart", methods=["POST"])

@@ -80,10 +80,35 @@
         <button id="btn-discover" class="btn btn-sm btn-outline-warning" title="Discover NDI sources on network">
           <i class="bi bi-radar me-1"></i>Discover Sources
         </button>
+        <button id="btn-reboot-all" class="btn btn-sm btn-outline-danger" title="Reboot all online decoders">
+          <i class="bi bi-power me-1"></i>Reboot All
+        </button>
       </div>
     </div>
   </div>
 </nav>
+
+<!-- Reboot All confirmation modal -->
+<div class="modal fade" id="rebootAllModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title text-danger"><i class="bi bi-power me-2"></i>Reboot All Decoders</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <p>This will send a reboot command to <strong>every online decoder</strong> simultaneously.</p>
+        <p class="text-warning mb-0"><i class="bi bi-exclamation-triangle me-1"></i>All connected displays will go dark for 30–60 seconds while devices restart.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-danger" id="btn-reboot-all-confirm">
+          <i class="bi bi-power me-1"></i>Reboot All
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- Scan result modal -->
 <div class="modal fade" id="scanResultModal" tabindex="-1">
