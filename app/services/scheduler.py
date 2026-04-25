@@ -60,8 +60,33 @@ def init_scheduler(app) -> BackgroundScheduler:
         coalesce=True,
     )
 
+    source_interval = app.config.get("SOURCE_POLL_INTERVAL", 60)
+    _scheduler.add_job(
+        _sync_tractus_sources,
+        trigger="interval",
+        seconds=source_interval,
+        id="leash_source_sync",
+        args=[app],
+        max_instances=1,
+        coalesce=True,
+    )
+
+    recv_interval = app.config.get("RECEIVER_POLL_INTERVAL", 15)
+    _scheduler.add_job(
+        _poll_receiver_sources,
+        trigger="interval",
+        seconds=recv_interval,
+        id="leash_receiver_poll",
+        args=[app],
+        max_instances=1,
+        coalesce=True,
+    )
+
     _scheduler.start()
-    logger.info("Leash scheduler: started (pid=%d, enforcement_interval=%ds)", os.getpid(), interval)
+    logger.info(
+        "Leash scheduler: started (pid=%d, enforcement=%ds, source_sync=%ds, recv_poll=%ds)",
+        os.getpid(), interval, source_interval, recv_interval,
+    )
 
     # atexit runs during graceful shutdown (gunicorn's default on SIGTERM),
     # which is enough for a clean scheduler stop.  A SIGKILL will cut the
@@ -340,3 +365,118 @@ def _enforce_persistent(app) -> None:
 
         db.session.commit()
         logger.info("Enforcement: corrected %d/%d receivers", ok_count, len(corrections))
+
+
+# ---------------------------------------------------------------------------
+# Job 3: Tractus MV source sync
+# ---------------------------------------------------------------------------
+
+def _sync_tractus_sources(app) -> None:
+    """Poll Tractus MV API and upsert NDISource table. Runs every SOURCE_POLL_INTERVAL."""
+    with app.app_context():
+        from app import db
+        from app.models import NDISource
+        from app.services.audit_log import sources_discovered
+        from app.services.tractus_client import fetch_sources
+
+        cfg = app.config
+        hosts = cfg.get("TRACTUS_MV_HOSTS", ["10.1.248.191", "10.1.248.192"])
+        port = cfg.get("TRACTUS_MV_PORT", 8901)
+        timeout = cfg.get("HTTP_TIMEOUT", 5)
+
+        names = run_async(fetch_sources(hosts=hosts, port=port, timeout=timeout))
+        if names is None:
+            logger.warning("Source sync: Tractus MV unreachable — skipping")
+            return
+
+        from datetime import datetime
+        now = datetime.utcnow()
+        added: list[str] = []
+        updated: list[str] = []
+        seen: set[str] = set()
+
+        for name in names:
+            clean = name.strip()
+            if not clean:
+                continue
+            seen.add(clean)
+            existing = NDISource.query.filter_by(name=clean).first()
+            if existing:
+                existing.discovered = True
+                existing.last_seen = now
+                if existing.source_index is None:
+                    existing.source_index = NDISource.next_index()
+                    db.session.flush()
+                updated.append(clean)
+            else:
+                new_src = NDISource(
+                    name=clean,
+                    discovered=True,
+                    last_seen=now,
+                    source_index=NDISource.next_index(),
+                )
+                db.session.add(new_src)
+                db.session.flush()
+                added.append(clean)
+
+        going_offline_count = NDISource.query.filter(
+            NDISource.discovered == True,   # noqa: E712
+            NDISource.name.notin_(seen),
+        ).count()
+        NDISource.query.filter(
+            NDISource.discovered == True,   # noqa: E712
+            NDISource.name.notin_(seen),
+        ).update({"discovered": False}, synchronize_session=False)
+
+        db.session.commit()
+
+        if added or updated or going_offline_count:
+            sources_discovered(added, updated, going_offline_count, via="tractus-mv-auto")
+            logger.info(
+                "Source sync: +%d new, %d refreshed, %d went offline",
+                len(added), len(updated), going_offline_count,
+            )
+        else:
+            logger.debug("Source sync: no changes (%d sources current)", len(seen))
+
+
+# ---------------------------------------------------------------------------
+# Job 4: Receiver current-source poller
+# ---------------------------------------------------------------------------
+
+def _poll_receiver_sources(app) -> None:
+    """
+    Lightweight poll: fetch the current NDI source from every online receiver
+    and persist the result.  Runs every RECEIVER_POLL_INTERVAL seconds.
+    Uses bulk_fetch_source (one HTTP call per device) so it is fast and cheap.
+    """
+    with app.app_context():
+        from app import db
+        from app.models import NDIReceiver
+        from app.services.birddog_client import bulk_fetch_source, client_config
+
+        receivers = NDIReceiver.query.all()
+        if not receivers:
+            return
+
+        recv_dicts = [{"id": r.id, "ip_last_octet": r.ip_last_octet} for r in receivers]
+        try:
+            results = run_async(bulk_fetch_source(recv_dicts, client_config(app.config)))
+        except Exception:
+            logger.exception("Receiver poll: bulk_fetch_source failed")
+            return
+
+        result_map = {r["id"]: r for r in results}
+        now = datetime.utcnow()
+
+        for recv in receivers:
+            r = result_map.get(recv.id)
+            if not r:
+                continue
+            recv.status = "online" if r["online"] else "offline"
+            if r.get("current_source") is not None:
+                recv.current_source = r["current_source"]
+            recv.updated_at = now
+
+        db.session.commit()
+        logger.debug("Receiver poll: updated %d receivers", len(receivers))

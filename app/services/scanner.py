@@ -57,8 +57,12 @@ async def scan_subnet(
     instead of creating a fresh session per probe.
     """
     sem = asyncio.Semaphore(64)
+    connector = aiohttp.TCPConnector(limit=64, enable_cleanup_closed=True)
 
-    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=timeout)) as session:
+    async with aiohttp.ClientSession(
+        connector=connector,
+        timeout=aiohttp.ClientTimeout(total=timeout, connect=min(timeout, 2)),
+    ) as session:
         async def _probe(octet: int) -> Optional[dict]:
             ip = f"{prefix}{octet}"
             async with sem:

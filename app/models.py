@@ -282,6 +282,39 @@ class ScheduledRecall(db.Model):
         }
 
 
+# ── App Settings ─────────────────────────────────────────────────────────
+
+class AppSetting(db.Model):
+    """Key-value store for all runtime-configurable settings.
+
+    Populated on first startup from config.py defaults / env-var overrides.
+    After that the DB is the source of truth; use the Settings UI or API.
+    """
+    __tablename__ = "app_settings"
+
+    key = db.Column(db.String(64), primary_key=True)
+    value = db.Column(db.Text, nullable=False, default="")
+    value_type = db.Column(db.String(16), default="string")  # string | int | bool
+    label = db.Column(db.String(100))
+    description = db.Column(db.String(256))
+    group_name = db.Column(db.String(64))
+    sensitive = db.Column(db.Boolean, default=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self, mask_sensitive: bool = True) -> dict:
+        display = "***" if (mask_sensitive and self.sensitive and self.value) else self.value
+        return {
+            "key": self.key,
+            "value": display,
+            "type": self.value_type,
+            "label": self.label,
+            "description": self.description,
+            "group": self.group_name,
+            "sensitive": self.sensitive,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 # ── NDI Sources ───────────────────────────────────────────────────────────
 
 class NDISource(db.Model):

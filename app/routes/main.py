@@ -1,6 +1,7 @@
 from flask import Blueprint, current_app, render_template
 
 from app.models import NDIReceiver, NDISource, ReceiverGroup, Layout, Snapshot, ScheduledRecall
+from app.services.settings_service import SETTINGS_SCHEMA, all_settings_dicts
 
 main_bp = Blueprint("main", __name__)
 
@@ -73,3 +74,13 @@ def schedules():
         concurrency=current_app.config.get("RECALL_CONCURRENCY", 10),
         enforcement_interval=current_app.config.get("ENFORCEMENT_INTERVAL", 60),
     )
+
+
+@main_bp.route("/settings")
+def settings():
+    settings_list = all_settings_dicts(mask_sensitive=True)
+    # Group by group_name for the template
+    groups: dict[str, list] = {}
+    for s in settings_list:
+        groups.setdefault(s["group"], []).append(s)
+    return render_template("settings.html", setting_groups=groups)
