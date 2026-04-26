@@ -39,14 +39,12 @@ from app.services.auth_service import (
 auth_bp = Blueprint("auth", __name__)
 logger = logging.getLogger(__name__)
 
-# Endpoints that are always public (no login required)
-_PUBLIC_ENDPOINTS = frozenset({"auth.login", "auth.logout", "static"})
-
+_PUBLIC_ENDPOINTS = frozenset({"auth.login", "auth.login_post", "auth.logout", "static"})
 _ALLOWED_ROLES = frozenset({"admin", "staff"})
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Internal helpers
 # ---------------------------------------------------------------------------
 
 def _auth_enabled() -> bool:
@@ -55,12 +53,8 @@ def _auth_enabled() -> bool:
 
 def _is_public_endpoint() -> bool:
     ep = request.endpoint or ""
-    if ep in _PUBLIC_ENDPOINTS:
-        return True
-    # External API has its own key-based auth — skip session check
-    if ep.startswith("v1."):
-        return True
-    return False
+    # External API has its own key-based auth
+    return ep in _PUBLIC_ENDPOINTS or ep.startswith("v1.")
 
 
 def _ua_hash() -> str:
@@ -68,8 +62,11 @@ def _ua_hash() -> str:
     return hashlib.sha256(ua.encode()).hexdigest()[:16]
 
 
+def _redirect_to_login():
+    return redirect(url_for("auth.login", next=request.path))
+
+
 def _populate_session(user: dict) -> None:
-    """Write all session keys after a successful login."""
     session.clear()  # session fixation protection
     session.permanent = True
     session["logged_in"] = True
@@ -86,7 +83,6 @@ def _populate_session(user: dict) -> None:
 
 
 def _do_role_refresh() -> None:
-    """Re-query the user's role from the DB; force logout if gone or demoted."""
     user_id = session.get("user_id")
     if not user_id:
         session.clear()
@@ -94,7 +90,6 @@ def _do_role_refresh() -> None:
 
     info = refresh_user_role(int(user_id))
     if info is None or info.get("role") not in _ALLOWED_ROLES:
-        # User deleted or no longer authorised — kill the session
         session.clear()
         return
 
@@ -104,37 +99,31 @@ def _do_role_refresh() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Decorators (also used by other blueprints)
+# Decorators (also exported via _helpers.py)
 # ---------------------------------------------------------------------------
 
 def login_required(f):
-    """Redirect to /login if the user is not authenticated."""
     @wraps(f)
     def decorated(*args, **kwargs):
         if _auth_enabled() and not session.get("logged_in"):
             if request.is_json:
                 return jsonify({"error": "Authentication required"}), 401
-            return redirect(url_for("auth.login", next=request.path))
+            return _redirect_to_login()
         return f(*args, **kwargs)
     return decorated
 
 
 def admin_required(f):
-    """Return 403 unless the authenticated user has the 'admin' role."""
+    """Require admin role; also enforces login via login_required."""
     @wraps(f)
-    def decorated(*args, **kwargs):
-        if _auth_enabled():
-            if not session.get("logged_in"):
-                if request.is_json:
-                    return jsonify({"error": "Authentication required"}), 401
-                return redirect(url_for("auth.login", next=request.path))
-            if session.get("role") != "admin":
-                if request.is_json:
-                    return jsonify({"error": "Admin access required"}), 403
-                flash("You need admin access to do that.", "danger")
-                return redirect(url_for("main.index"))
+    def _admin_check(*args, **kwargs):
+        if _auth_enabled() and session.get("role") != "admin":
+            if request.is_json:
+                return jsonify({"error": "Admin access required"}), 403
+            flash("You need admin access to do that.", "danger")
+            return redirect(url_for("main.index"))
         return f(*args, **kwargs)
-    return decorated
+    return login_required(_admin_check)
 
 
 # ---------------------------------------------------------------------------
@@ -145,21 +134,19 @@ def _register_before_request(app) -> None:
 
     @app.before_request
     def _check_login():
-        """Enforce authentication on every non-public request."""
         if not _auth_enabled() or _is_public_endpoint():
             return None
 
         if not session.get("logged_in"):
             if request.is_json:
                 return jsonify({"error": "Authentication required"}), 401
-            return redirect(url_for("auth.login", next=request.path))
+            return _redirect_to_login()
 
-        # Role refresh every 5 minutes
+        # Re-query role every 5 minutes; clear session if user gone or demoted
         last_str = session.get("last_role_refresh")
         if last_str:
             try:
-                last_dt = datetime.fromisoformat(last_str)
-                if datetime.utcnow() - last_dt > timedelta(minutes=5):
+                if datetime.utcnow() - datetime.fromisoformat(last_str) > timedelta(minutes=5):
                     _do_role_refresh()
                     if not session.get("logged_in"):
                         if request.is_json:
@@ -168,35 +155,19 @@ def _register_before_request(app) -> None:
             except (ValueError, TypeError):
                 pass
 
-        # must_change_password → nudge toward external auth app
-        if session.get("must_change_password"):
-            forgot_url = current_app.config.get("AUTH_FORGOT_PASSWORD_URL", "")
-            if forgot_url:
-                flash(
-                    f'Your password must be changed. '
-                    f'<a href="{forgot_url}" target="_blank" class="alert-link">'
-                    f'Change it here</a>.',
-                    "warning",
-                )
-
-        # Expose auth info to templates via g
         g.current_user = {
             "id": session.get("user_id"),
             "username": session.get("username"),
             "display_name": session.get("display_name"),
             "role": session.get("role"),
+            "must_change_password": session.get("must_change_password", False),
         }
 
     @app.before_request
     def _csrf_check():
-        """CSRF protection for HTML form POSTs (login form only)."""
-        if request.method != "POST":
-            return None
-        ep = request.endpoint or ""
-        # Only validate the CSRF token on the login form (all API endpoints
-        # use Content-Type: application/json which browsers can't forge
-        # cross-origin without a CORS preflight — so same-origin is guaranteed).
-        if ep != "auth.login":
+        # JSON API endpoints are same-origin-safe via Content-Type preflight;
+        # only the login HTML form needs an explicit token.
+        if request.method != "POST" or (request.endpoint or "") != "auth.login_post":
             return None
         token = request.form.get("csrf_token", "")
         expected = session.get("_csrf_token", "")
@@ -207,7 +178,6 @@ def _register_before_request(app) -> None:
 
     @app.context_processor
     def _inject_auth():
-        """Make auth info available in every template."""
         return {
             "current_user": g.get("current_user") or {},
             "auth_enabled": _auth_enabled(),
@@ -216,7 +186,6 @@ def _register_before_request(app) -> None:
 
 
 def init_auth(app) -> None:
-    """Call from create_app() after all blueprints are registered."""
     _register_before_request(app)
 
 
@@ -228,7 +197,6 @@ def init_auth(app) -> None:
 def login():
     if session.get("logged_in"):
         return redirect(url_for("main.index"))
-    # Ensure a CSRF token exists for the form
     if "_csrf_token" not in session:
         session["_csrf_token"] = secrets.token_hex(32)
     return render_template("login.html", next=request.args.get("next", ""))
@@ -237,42 +205,36 @@ def login():
 @auth_bp.route("/login", methods=["POST"])
 @limiter.limit("15 per minute")
 def login_post():
-    # Rate limiting is applied via the limiter in __init__.py using a
-    # decorator on this view (registered after the limiter is initialised).
     username = request.form.get("username", "").strip()
     password = request.form.get("password", "")
     next_url = request.form.get("next", "").strip()
 
+    def fail(msg: str, code: int = 401):
+        flash(msg, "danger")
+        return render_template("login.html", next=next_url), code
+
     if not username or not password:
-        flash("Username and password are required.", "danger")
-        return render_template("login.html", next=next_url), 400
+        return fail("Username and password are required.", 400)
 
     user = get_user_by_username(username)
 
     if user is None:
-        # Run dummy check to equalise timing
         dummy_password_check()
         logger.warning("auth: login attempt for unknown user %r from %s", username, request.remote_addr)
-        flash("Invalid username or password.", "danger")
-        return render_template("login.html", next=next_url), 401
+        return fail("Invalid username or password.")
 
     if not check_password_hash(user["password_hash"], password):
         logger.warning("auth: bad password for user %r from %s", username, request.remote_addr)
-        flash("Invalid username or password.", "danger")
-        return render_template("login.html", next=next_url), 401
+        return fail("Invalid username or password.")
 
     role = user.get("role", "")
     if role not in _ALLOWED_ROLES:
-        logger.warning(
-            "auth: login denied for user %r (role=%r) — not staff or admin", username, role
-        )
-        flash("Your account does not have access to Leash.", "danger")
-        return render_template("login.html", next=next_url), 403
+        logger.warning("auth: login denied for user %r (role=%r) — not staff or admin", username, role)
+        return fail("Your account does not have access to Leash.", 403)
 
     _populate_session(user)
     logger.info("auth: user %r (role=%r) logged in from %s", username, role, request.remote_addr)
 
-    # Safe redirect: only allow relative paths
     if next_url and next_url.startswith("/") and not next_url.startswith("//"):
         return redirect(next_url)
     return redirect(url_for("main.index"))

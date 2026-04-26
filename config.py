@@ -10,6 +10,7 @@ DB has been seeded) or in test environments where the DB might not exist.
 They are overwritten by the DB-persisted values on every subsequent startup.
 """
 import os
+from datetime import timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -73,8 +74,6 @@ class Config:
     # Session security
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
-
-    from datetime import timedelta
     PERMANENT_SESSION_LIFETIME = timedelta(hours=12)
 
 

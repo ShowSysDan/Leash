@@ -1,11 +1,5 @@
 """
 Shared helpers for Leash route blueprints.
-
-Deduplicates _err() (was copied into 5 blueprints) and provides input
-validators that are used at API boundaries.
-
-Auth decorators (login_required, admin_required) are defined in
-app.routes.auth and re-exported here for convenience.
 """
 import re
 
@@ -64,13 +58,4 @@ def valid_name(value, max_len: int = MAX_NAME) -> tuple[bool, str]:
     return True, s
 
 
-# ── Auth decorators (thin re-exports from app.routes.auth) ────────────────
-
-def login_required(f):
-    from app.routes.auth import login_required as _lr
-    return _lr(f)
-
-
-def admin_required(f):
-    from app.routes.auth import admin_required as _ar
-    return _ar(f)
+from app.routes.auth import admin_required, login_required  # noqa: F401

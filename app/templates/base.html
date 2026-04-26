@@ -171,6 +171,31 @@
 <div id="toast-container" class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index:9999"></div>
 
 <main class="container-fluid py-3">
+
+  {# Flash messages (plain text only — no | safe) #}
+  {% with messages = get_flashed_messages(with_categories=true) %}
+  {% if messages %}
+  <div class="mb-3">
+    {% for category, message in messages %}
+    <div class="alert alert-{{ category }} alert-dismissible fade show py-2 mb-1" role="alert">
+      {{ message }}
+      <button type="button" class="btn-close btn-close-sm" data-bs-dismiss="alert"></button>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endwith %}
+
+  {# must_change_password banner — link rendered safely by Jinja2 auto-escape #}
+  {% if current_user.get('must_change_password') and auth_forgot_url %}
+  <div class="alert alert-warning alert-dismissible fade show py-2 mb-3" role="alert">
+    <i class="bi bi-key me-1"></i>
+    Your password must be changed.
+    <a href="{{ auth_forgot_url }}" class="alert-link" target="_blank" rel="noopener">Change it here</a>.
+    <button type="button" class="btn-close btn-close-sm" data-bs-dismiss="alert"></button>
+  </div>
+  {% endif %}
+
   {% block content %}{% endblock %}
 </main>
 

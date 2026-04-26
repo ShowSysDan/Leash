@@ -24,12 +24,6 @@ def _schema(app) -> str:
 
 
 def get_user_by_username(username: str) -> Optional[dict]:
-    """
-    Return a user dict or None.
-
-    Dict keys: id, username, password_hash, role, display_name,
-               must_change_password
-    """
     from flask import current_app
     from app import db
     from sqlalchemy import text
@@ -41,36 +35,25 @@ def get_user_by_username(username: str) -> Optional[dict]:
     safe = schema.replace('"', '""')
     try:
         sql = text(f"""
-            SELECT id,
-                   username,
-                   password_hash,
-                   role,
-                   must_change_password
+            SELECT id, username, password_hash, role, must_change_password
             FROM "{safe}".users
             WHERE username = :username
             LIMIT 1
         """)
-        with db.engine.connect() as conn:
-            row = conn.execute(sql, {"username": username}).mappings().first()
-            if row is None:
-                return None
-            d = dict(row)
-            # display_name: use username as the best-effort fallback
-            d.setdefault("display_name", d["username"])
-            d["must_change_password"] = bool(d.get("must_change_password"))
-            return d
+        row = db.session.execute(sql, {"username": username}).mappings().first()
+        if row is None:
+            return None
+        d = dict(row)
+        d.setdefault("display_name", d["username"])
+        d["must_change_password"] = bool(d.get("must_change_password"))
+        return d
     except Exception:
         logger.exception("auth_service: failed to query user %r", username)
         return None
 
 
 def refresh_user_role(user_id: int) -> Optional[dict]:
-    """
-    Re-query role + must_change_password for an already-authenticated user.
-
-    Returns dict with keys: id, role, must_change_password — or None if the
-    user no longer exists or the DB is unreachable.
-    """
+    """Returns {id, role, must_change_password} or None if user gone / DB unreachable."""
     from flask import current_app
     from app import db
     from sqlalchemy import text
@@ -87,13 +70,12 @@ def refresh_user_role(user_id: int) -> Optional[dict]:
             WHERE id = :user_id
             LIMIT 1
         """)
-        with db.engine.connect() as conn:
-            row = conn.execute(sql, {"user_id": user_id}).mappings().first()
-            if row is None:
-                return None
-            d = dict(row)
-            d["must_change_password"] = bool(d.get("must_change_password"))
-            return d
+        row = db.session.execute(sql, {"user_id": user_id}).mappings().first()
+        if row is None:
+            return None
+        d = dict(row)
+        d["must_change_password"] = bool(d.get("must_change_password"))
+        return d
     except Exception:
         logger.exception("auth_service: failed to refresh role for user_id=%d", user_id)
         return None
