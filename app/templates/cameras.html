@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Cameras — Leash{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <h4 class="mb-0"><i class="bi bi-camera-video me-2"></i>PTZ Cameras</h4>
+  <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#addCameraModal">
+    <i class="bi bi-plus-circle me-1"></i>Add Camera
+  </button>
+</div>
+
+{% if not cameras %}
+<div class="alert alert-secondary">
+  No cameras found. Click <strong>Scan Network</strong> in the toolbar to auto-detect BirdDog PTZ cameras,
+  or use <strong>Add Camera</strong> to add one manually.
+</div>
+{% else %}
+<div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 row-cols-xxl-4 g-3">
+  {% for cam in cameras %}
+  <div class="col" id="cam-col-{{ cam.id }}">
+    <div class="card h-100 camera-card border-{{ 'success' if cam.status == 'online' else 'danger' if cam.status == 'offline' else 'secondary' }}">
+      <div class="card-header d-flex align-items-center justify-content-between py-2">
+        <div class="d-flex align-items-center gap-2">
+          <span class="status-dot status-{{ cam.status }}"></span>
+          <span class="fw-semibold hostname-display">{{ cam.hostname or cam.label or '.' ~ cam.ip_last_octet }}</span>
+        </div>
+        <small class="text-muted">.{{ cam.ip_last_octet }}</small>
+      </div>
+      <div class="card-body py-2">
+        {% if cam.label %}
+        <div class="small text-muted mb-1">{{ cam.label }}</div>
+        {% endif %}
+        <div class="small">
+          <span class="badge bg-secondary me-1">{{ cam.model or 'Unknown' }}</span>
+          {% if cam.firmware_version %}
+          <span class="text-muted">{{ cam.firmware_version }}</span>
+          {% endif %}
+        </div>
+        {% if cam.presets %}
+        <div class="mt-2 small text-muted">{{ cam.presets | length }} preset{{ 's' if cam.presets | length != 1 }}</div>
+        {% endif %}
+      </div>
+      <div class="card-footer d-flex gap-2 py-2">
+        <a href="{{ url_for('main.camera_detail', camera_id=cam.id) }}"
+           class="btn btn-sm btn-outline-primary flex-grow-1">
+          <i class="bi bi-joystick me-1"></i>Control
+        </a>
+        <button class="btn btn-sm btn-outline-danger btn-remove-camera"
+                data-camera-id="{{ cam.id }}"
+                data-camera-name="{{ (cam.label or cam.hostname or '.' ~ cam.ip_last_octet) | e }}"
+                title="Remove camera">
+          <i class="bi bi-trash"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Add Camera Modal -->
+<div class="modal fade" id="addCameraModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-camera-video me-2"></i>Add Camera</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">IP Last Octet <span class="text-danger">*</span></label>
+          <div class="input-group">
+            <span class="input-group-text text-muted small">10.1.248.</span>
+            <input type="number" class="form-control" id="add-cam-octet" min="1" max="254" placeholder="e.g. 32">
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Label <span class="text-muted small">(optional)</span></label>
+          <input type="text" class="form-control" id="add-cam-label" maxlength="100" placeholder="e.g. Stage Left">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" id="btn-add-camera-confirm">Add Camera</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('btn-add-camera-confirm')?.addEventListener('click', async () => {
+    const octet = document.getElementById('add-cam-octet').value.trim();
+    const label = document.getElementById('add-cam-label').value.trim();
+    if (!octet) { window.Leash.toast('IP octet is required', 'warning'); return; }
+    const resp = await fetch('/api/cameras', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip_last_octet: octet, label: label || undefined }),
+    });
+    if (resp.ok) {
+      window.Leash.toast('Camera added', 'success');
+      setTimeout(() => location.reload(), 600);
+    } else {
+      const d = await resp.json();
+      window.Leash.toast(d.error || 'Failed to add camera', 'danger');
+    }
+  });
+
+  document.querySelectorAll('.btn-remove-camera').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const name = btn.dataset.cameraName;
+      if (!confirm(`Remove "${name}" from the database?\n\nThis will not affect the device.`)) return;
+      const resp = await fetch(`/api/cameras/${btn.dataset.cameraId}`, { method: 'DELETE' });
+      if (resp.ok) {
+        document.getElementById(`cam-col-${btn.dataset.cameraId}`)?.remove();
+        window.Leash.toast(`Removed ${name}`, 'warning');
+      } else {
+        window.Leash.toast('Remove failed', 'danger');
+      }
+    });
+  });
+});
+</script>
+{% endblock %}

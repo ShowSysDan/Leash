@@ -1,6 +1,6 @@
 from flask import Blueprint, current_app, render_template
 
-from app.models import NDIReceiver, NDISource, ReceiverGroup, Layout, Snapshot, ScheduledRecall
+from app.models import NDIReceiver, NDISource, PTZCamera, ReceiverGroup, Layout, Snapshot, ScheduledRecall
 from app.services.settings_service import SETTINGS_SCHEMA, all_settings_dicts
 
 main_bp = Blueprint("main", __name__)
@@ -63,14 +63,28 @@ def snapshots():
     return render_template("snapshots.html", snapshots=all_snaps, receivers=all_receivers)
 
 
+@main_bp.route("/cameras")
+def cameras():
+    all_cameras = PTZCamera.query.order_by(PTZCamera.index).all()
+    return render_template("cameras.html", cameras=all_cameras)
+
+
+@main_bp.route("/cameras/<int:camera_id>")
+def camera_detail(camera_id: int):
+    cam = PTZCamera.query.get_or_404(camera_id)
+    return render_template("camera_detail.html", camera=cam)
+
+
 @main_bp.route("/schedules")
 def schedules():
     all_schedules = ScheduledRecall.query.order_by(ScheduledRecall.time_of_day).all()
     all_snapshots = Snapshot.query.order_by(Snapshot.name).all()
+    all_cameras = PTZCamera.query.order_by(PTZCamera.index).all()
     return render_template(
         "schedules.html",
         schedules=all_schedules,
         snapshots=all_snapshots,
+        cameras=all_cameras,
         concurrency=current_app.config.get("RECALL_CONCURRENCY", 10),
         enforcement_interval=current_app.config.get("ENFORCEMENT_INTERVAL", 60),
     )

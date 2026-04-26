@@ -127,10 +127,13 @@ def _check_schedules(app) -> None:
             days = [d.strip() for d in sched.days_of_week.split(",")]
             if current_dow in days and current_hhmm == sched.time_of_day:
                 logger.info(
-                    "Leash scheduler: firing schedule %r (id=%d) → snapshot_id=%s",
-                    sched.name, sched.id, sched.snapshot_id,
+                    "Leash scheduler: firing %s schedule %r (id=%d)",
+                    sched.schedule_type, sched.name, sched.id,
                 )
-                _do_recall(app, sched.id)
+                if sched.schedule_type == "camera":
+                    _do_camera_recall(app, sched.id)
+                else:
+                    _do_recall(app, sched.id)
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +236,60 @@ def _do_recall(app, schedule_id: int) -> None:
         logger.info(
             "Leash scheduler: %r complete — %d/%d succeeded (concurrency=%d)",
             sched.name, len(ok_map), len(to_apply), concurrency,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Camera preset recall
+# ---------------------------------------------------------------------------
+
+def _do_camera_recall(app, schedule_id: int) -> None:
+    """Recall a camera preset for a camera-type scheduled event."""
+    from app import db
+    from app.models import PTZCamera, ScheduledRecall
+    from app.services.birddog_client import client_from_camera, run_async
+
+    with app.app_context():
+        sched = db.session.get(ScheduledRecall, schedule_id)
+        if not sched:
+            return
+
+        if sched.camera_id is None or sched.preset_number is None:
+            sched.last_run = datetime.utcnow()
+            sched.last_result = "SKIPPED: no camera or preset configured"
+            db.session.commit()
+            return
+
+        cam = db.session.get(PTZCamera, sched.camera_id)
+        if not cam:
+            sched.last_run = datetime.utcnow()
+            sched.last_result = "SKIPPED: camera was deleted"
+            db.session.commit()
+            return
+
+        if cam.status == "offline":
+            sched.last_run = datetime.utcnow()
+            sched.last_result = "SKIPPED: camera offline"
+            db.session.commit()
+            return
+
+        try:
+            client = client_from_camera(cam, app.config)
+            code, _ = run_async(client.recall_preset(sched.preset_number))
+            ok = code == 200
+        except Exception as exc:
+            logger.exception("Camera recall failed for schedule %r", sched.name)
+            sched.last_run = datetime.utcnow()
+            sched.last_result = f"ERROR: {exc}"
+            db.session.commit()
+            return
+
+        sched.last_run = datetime.utcnow()
+        sched.last_result = f"{'OK' if ok else 'FAILED'}: preset {sched.preset_number} on {cam.display_name}"
+        db.session.commit()
+        logger.info(
+            "Camera recall %r: preset %d on %s → HTTP %d",
+            sched.name, sched.preset_number, cam.display_name, code,
         )
 
 

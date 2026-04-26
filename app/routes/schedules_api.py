@@ -14,12 +14,26 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 
 from app import db
-from app.models import ScheduledRecall, Snapshot
+from app.models import PTZCamera, ScheduledRecall, Snapshot
 from app.routes._helpers import err as _err, valid_time_of_day, valid_name
 
 schedules_api_bp = Blueprint("schedules_api", __name__)
 
 _VALID_DAYS = {"0", "1", "2", "3", "4", "5", "6"}
+
+
+def _validate_days_time(body: dict):
+    """Shared day/time validation. Returns (days_str, time_str, error) or (…, None)."""
+    days_raw = body.get("days_of_week", "")
+    days_list = [str(d) for d in days_raw] if isinstance(days_raw, list) else \
+                [d.strip() for d in str(days_raw).split(",") if d.strip()]
+    if not days_list or not all(d in _VALID_DAYS for d in days_list):
+        return None, None, "days_of_week must be day numbers 0 (Mon) – 6 (Sun)"
+    days_str = ",".join(sorted(set(days_list), key=int))
+    time_str = (body.get("time_of_day") or "").strip()
+    if not valid_time_of_day(time_str):
+        return None, None, "time_of_day must be HH:MM (24-hour, local server time)"
+    return days_str, time_str, None
 
 
 def _validate_body(body: dict):
@@ -28,38 +42,51 @@ def _validate_body(body: dict):
     if not ok:
         return None, "name is required (max 100 characters)"
 
-    snap_id = body.get("snapshot_id")
-    if snap_id is None:
-        return None, "snapshot_id is required"
-    if not Snapshot.query.get(int(snap_id)):
-        return None, f"Snapshot {snap_id} not found"
+    days_str, time_str, days_err = _validate_days_time(body)
+    if days_err:
+        return None, days_err
 
-    days_raw = body.get("days_of_week", "")
-    if isinstance(days_raw, list):
-        days_list = [str(d) for d in days_raw]
+    stype = body.get("schedule_type", "ndi")
+    if stype not in ("ndi", "camera"):
+        return None, "schedule_type must be 'ndi' or 'camera'"
+
+    if stype == "camera":
+        cam_id = body.get("camera_id")
+        preset_num = body.get("preset_number")
+        if cam_id is None:
+            return None, "camera_id is required for camera schedules"
+        if not PTZCamera.query.get(int(cam_id)):
+            return None, f"Camera {cam_id} not found"
+        if preset_num is None or not (0 <= int(preset_num) <= 99):
+            return None, "preset_number must be 0–99"
+        return {
+            "name": name,
+            "schedule_type": "camera",
+            "camera_id": int(cam_id),
+            "preset_number": int(preset_num),
+            "days_of_week": days_str,
+            "time_of_day": time_str,
+            "enabled": bool(body.get("enabled", True)),
+        }, None
     else:
-        days_list = [d.strip() for d in str(days_raw).split(",") if d.strip()]
-    if not days_list or not all(d in _VALID_DAYS for d in days_list):
-        return None, "days_of_week must be a non-empty list/string of day numbers 0 (Mon) – 6 (Sun)"
-    days_str = ",".join(sorted(set(days_list), key=int))
-
-    time_str = (body.get("time_of_day") or "").strip()
-    if not valid_time_of_day(time_str):
-        return None, "time_of_day must be HH:MM (24-hour, local server time)"
-
-    persist_minutes = int(body.get("persist_minutes", 60))
-    if persist_minutes < 1 or persist_minutes > 1440:
-        return None, "persist_minutes must be between 1 and 1440"
-
-    return {
-        "name": name,
-        "snapshot_id": int(snap_id),
-        "days_of_week": days_str,
-        "time_of_day": time_str,
-        "enabled": bool(body.get("enabled", True)),
-        "persistent": bool(body.get("persistent", False)),
-        "persist_minutes": persist_minutes,
-    }, None
+        snap_id = body.get("snapshot_id")
+        if snap_id is None:
+            return None, "snapshot_id is required for ndi schedules"
+        if not Snapshot.query.get(int(snap_id)):
+            return None, f"Snapshot {snap_id} not found"
+        persist_minutes = int(body.get("persist_minutes", 60))
+        if persist_minutes < 1 or persist_minutes > 1440:
+            return None, "persist_minutes must be between 1 and 1440"
+        return {
+            "name": name,
+            "schedule_type": "ndi",
+            "snapshot_id": int(snap_id),
+            "days_of_week": days_str,
+            "time_of_day": time_str,
+            "enabled": bool(body.get("enabled", True)),
+            "persistent": bool(body.get("persistent", False)),
+            "persist_minutes": persist_minutes,
+        }, None
 
 
 @schedules_api_bp.route("/schedules", methods=["GET"])

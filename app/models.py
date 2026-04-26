@@ -216,7 +216,92 @@ class SnapshotEntry(db.Model):
         }
 
 
-# ── Scheduled Recalls ─────────────────────────────────────────────────────
+# ── PTZ Cameras ───────────────────────────────────────────────────────────
+
+class PTZCamera(db.Model):
+    __tablename__ = "ptz_cameras"
+
+    id = db.Column(db.Integer, primary_key=True)
+    index = db.Column(db.Integer, unique=True, nullable=False)
+    label = db.Column(db.String(100))
+    ip_last_octet = db.Column(db.String(3), unique=True, nullable=False)
+    model = db.Column(db.String(50))   # "P120", "A200GEN2", "P100", …
+
+    hostname = db.Column(db.String(255))
+    status = db.Column(db.String(20), default="unknown")  # online / offline / unknown
+
+    hardware_version = db.Column(db.String(100))
+    firmware_version = db.Column(db.String(100))
+    serial_number = db.Column(db.String(50))
+    mcu_version = db.Column(db.String(50))
+    network_config_method = db.Column(db.String(20))
+    gateway = db.Column(db.String(20))
+    network_mask = db.Column(db.String(20))
+
+    first_seen = db.Column(db.DateTime, default=datetime.utcnow)
+    last_seen = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    presets = db.relationship(
+        "CameraPreset", backref="camera",
+        cascade="all, delete-orphan", order_by="CameraPreset.preset_number",
+    )
+
+    @property
+    def ip_address(self) -> str:
+        prefix = current_app.config.get("NDI_SUBNET_PREFIX", "10.1.248.")
+        return f"{prefix}{self.ip_last_octet}"
+
+    @property
+    def display_name(self) -> str:
+        return self.label or self.hostname or self.ip_last_octet
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "index": self.index,
+            "label": self.label or self.hostname or f"Camera {self.ip_last_octet}",
+            "ip_last_octet": self.ip_last_octet,
+            "ip_address": self.ip_address,
+            "hostname": self.hostname,
+            "model": self.model,
+            "status": self.status,
+            "hardware_version": self.hardware_version,
+            "firmware_version": self.firmware_version,
+            "serial_number": self.serial_number,
+            "mcu_version": self.mcu_version,
+            "network_config_method": self.network_config_method,
+            "gateway": self.gateway,
+            "network_mask": self.network_mask,
+            "last_seen": self.last_seen.isoformat() if self.last_seen else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "presets": [p.to_dict() for p in self.presets],
+        }
+
+
+class CameraPreset(db.Model):
+    __tablename__ = "camera_presets"
+
+    id = db.Column(db.Integer, primary_key=True)
+    camera_id = db.Column(
+        db.Integer, db.ForeignKey("ptz_cameras.id", ondelete="CASCADE"), nullable=False
+    )
+    preset_number = db.Column(db.Integer, nullable=False)   # 0–99
+    name = db.Column(db.String(100), nullable=False)
+
+    __table_args__ = (db.UniqueConstraint("camera_id", "preset_number"),)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "camera_id": self.camera_id,
+            "preset_number": self.preset_number,
+            "name": self.name,
+        }
+
+
+
 
 class ScheduledRecall(db.Model):
     __tablename__ = "scheduled_recalls"
@@ -224,8 +309,15 @@ class ScheduledRecall(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
 
-    # Null if the snapshot was deleted — schedule stays but is skipped until reassigned
+    # "ndi" = recall an NDI snapshot; "camera" = recall a camera preset
+    schedule_type = db.Column(db.String(20), nullable=False, default="ndi")
+
+    # NDI type: null if the snapshot was deleted — schedule stays but skipped until reassigned
     snapshot_id = db.Column(db.Integer, db.ForeignKey("snapshots.id", ondelete="SET NULL"), nullable=True)
+
+    # Camera type: which camera and which preset number (0–99)
+    camera_id = db.Column(db.Integer, db.ForeignKey("ptz_cameras.id", ondelete="SET NULL"), nullable=True)
+    preset_number = db.Column(db.Integer, nullable=True)
 
     # Comma-separated weekday numbers: 0=Mon … 6=Sun  (e.g. "0,1,2,3,4" = Mon–Fri)
     days_of_week = db.Column(db.String(20), nullable=False)
@@ -233,19 +325,19 @@ class ScheduledRecall(db.Model):
     time_of_day = db.Column(db.String(5), nullable=False)
 
     enabled = db.Column(db.Boolean, default=True, nullable=False)
-    last_run = db.Column(db.DateTime)       # UTC timestamp of last execution
-    last_result = db.Column(db.String(255)) # human-readable outcome of last run
+    last_run = db.Column(db.DateTime)
+    last_result = db.Column(db.String(255))
 
-    # Persistence / enforcement
+    # Persistence / enforcement — only meaningful for schedule_type="ndi"
     persistent = db.Column(db.Boolean, default=False, nullable=False)
     persist_minutes = db.Column(db.Integer, default=60)
-    # When set (UTC), the enforcement poller actively corrects drift until this time
     enforcing_until = db.Column(db.DateTime, nullable=True)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     snapshot = db.relationship("Snapshot", lazy="joined")
+    camera = db.relationship("PTZCamera", lazy="joined")
 
     DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
@@ -262,24 +354,39 @@ class ScheduledRecall(db.Model):
         return max(0, int(delta.total_seconds() // 60))
 
     def to_dict(self) -> dict:
-        return {
+        d: dict = {
             "id": self.id,
             "name": self.name,
-            "snapshot_id": self.snapshot_id,
-            "snapshot_name": self.snapshot.name if self.snapshot else None,
+            "schedule_type": self.schedule_type,
             "days_of_week": self.days_of_week,
             "day_labels": self.day_labels(),
             "time_of_day": self.time_of_day,
             "enabled": self.enabled,
-            "persistent": self.persistent,
-            "persist_minutes": self.persist_minutes,
-            "enforcing_until": self.enforcing_until.isoformat() if self.enforcing_until else None,
-            "is_enforcing": self.is_enforcing(),
-            "enforcement_minutes_remaining": self.enforcement_minutes_remaining(),
             "last_run": self.last_run.isoformat() if self.last_run else None,
             "last_result": self.last_result,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+        if self.schedule_type == "camera":
+            d["camera_id"] = self.camera_id
+            d["camera_name"] = self.camera.display_name if self.camera else None
+            d["preset_number"] = self.preset_number
+            # Look up preset label from the camera's preset list
+            preset_label = None
+            if self.camera and self.preset_number is not None:
+                for p in self.camera.presets:
+                    if p.preset_number == self.preset_number:
+                        preset_label = p.name
+                        break
+            d["preset_label"] = preset_label
+        else:
+            d["snapshot_id"] = self.snapshot_id
+            d["snapshot_name"] = self.snapshot.name if self.snapshot else None
+            d["persistent"] = self.persistent
+            d["persist_minutes"] = self.persist_minutes
+            d["enforcing_until"] = self.enforcing_until.isoformat() if self.enforcing_until else None
+            d["is_enforcing"] = self.is_enforcing()
+            d["enforcement_minutes_remaining"] = self.enforcement_minutes_remaining()
+        return d
 
 
 # ── App Settings ─────────────────────────────────────────────────────────
