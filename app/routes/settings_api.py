@@ -9,7 +9,7 @@ import logging
 
 from flask import Blueprint, current_app, jsonify, request
 
-from app.routes._helpers import err as _err
+from app.routes._helpers import admin_required, err as _err
 from app.services.settings_service import (
     _SCHEMA_MAP,
     all_settings_dicts,
@@ -22,11 +22,13 @@ settings_api_bp = Blueprint("settings_api", __name__)
 
 
 @settings_api_bp.route("/settings", methods=["GET"])
+@admin_required
 def get_settings():
     return jsonify(all_settings_dicts(mask_sensitive=True))
 
 
 @settings_api_bp.route("/settings/schema", methods=["GET"])
+@admin_required
 def get_schema():
     """Return schema metadata (no values) for front-end form construction."""
     from app.services.settings_service import SETTINGS_SCHEMA
@@ -37,6 +39,7 @@ def get_schema():
 
 
 @settings_api_bp.route("/settings", methods=["PUT"])
+@admin_required
 def update_settings():
     body = request.get_json(silent=True) or {}
     if not isinstance(body, dict):
