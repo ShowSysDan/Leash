@@ -172,6 +172,7 @@ window.LEASH.receivers = {{ receivers | map(attribute='id') | list | tojson }};
 window.LEASH.receiverStatuses = {
   {% for r in receivers %}"{{ r.id }}": "{{ r.status }}"{% if not loop.last %},{% endif %}{% endfor %}
 };
+window.LEASH.sources = {{ sources | map(attribute='name') | list | tojson }};
 </script>
 <script src="{{ url_for('static', filename='js/snapshots.js') }}"></script>
 {% endblock %}

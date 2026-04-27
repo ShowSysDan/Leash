@@ -73,10 +73,85 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const table = document.createElement('table');
       table.className = 'table table-sm table-dark';
-      table.innerHTML = '<thead><tr><th>Receiver</th><th>IP</th><th>Saved Source</th><th>Current Status</th></tr></thead>';
+      table.innerHTML = '<thead><tr><th>Receiver</th><th>IP</th><th>Saved Source <small class="text-muted fw-normal">(click ✏ to edit)</small></th><th>Status</th></tr></thead>';
       const tbody = document.createElement('tbody');
 
       const STATUS_CLS = { online: 'bg-success', offline: 'bg-danger' };
+      const allSources = window.LEASH?.sources || [];
+
+      function makeSourceCell(e) {
+        const td = document.createElement('td');
+
+        function showView() {
+          td.textContent = '';
+          const wrap = document.createElement('div');
+          wrap.className = 'd-flex align-items-center gap-2';
+
+          const label = document.createElement('span');
+          label.className = 'snap-source-label';
+          if (e.source_name) {
+            label.textContent = e.source_name;
+          } else {
+            label.className += ' text-muted fst-italic';
+            label.textContent = 'none';
+          }
+
+          const editBtn = document.createElement('button');
+          editBtn.className = 'btn btn-xs btn-outline-secondary ms-auto';
+          editBtn.title = 'Edit saved source';
+          editBtn.innerHTML = '<i class="bi bi-pencil"></i>';
+          editBtn.addEventListener('click', showEdit);
+
+          wrap.appendChild(label);
+          wrap.appendChild(editBtn);
+          td.appendChild(wrap);
+        }
+
+        function showEdit() {
+          td.textContent = '';
+          const wrap = document.createElement('div');
+          wrap.className = 'd-flex align-items-center gap-1';
+
+          const sel = document.createElement('select');
+          sel.className = 'form-select form-select-sm';
+          sel.style.minWidth = '10rem';
+          sel.add(new Option('— none —', ''));
+          allSources.forEach(name => sel.add(new Option(name, name)));
+          sel.value = e.source_name || '';
+
+          const saveBtn = document.createElement('button');
+          saveBtn.className = 'btn btn-xs btn-success';
+          saveBtn.textContent = 'Save';
+          saveBtn.addEventListener('click', async () => {
+            const newSource = sel.value;
+            const resp = await fetch(`/api/snapshots/${_previewSnapId}/entries/${e.id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ source_name: newSource }),
+            });
+            if (resp.ok) {
+              e.source_name = newSource;
+              window.Leash.toast('Entry updated', 'success');
+            } else {
+              window.Leash.toast('Update failed', 'danger');
+            }
+            showView();
+          });
+
+          const cancelBtn = document.createElement('button');
+          cancelBtn.className = 'btn btn-xs btn-secondary';
+          cancelBtn.textContent = 'Cancel';
+          cancelBtn.addEventListener('click', showView);
+
+          wrap.appendChild(sel);
+          wrap.appendChild(saveBtn);
+          wrap.appendChild(cancelBtn);
+          td.appendChild(wrap);
+        }
+
+        showView();
+        return td;
+      }
 
       entries.forEach(e => {
         const tr = document.createElement('tr');
@@ -87,18 +162,8 @@ document.addEventListener('DOMContentLoaded', () => {
           return el;
         };
         tr.appendChild(td('', e.receiver_label || '—'));
-        tr.appendChild(td('text-muted', e.receiver_ip || '—'));
-
-        const srcTd = document.createElement('td');
-        if (e.source_name) {
-          srcTd.textContent = e.source_name;
-        } else {
-          const em = document.createElement('em');
-          em.className = 'text-muted';
-          em.textContent = 'none';
-          srcTd.appendChild(em);
-        }
-        tr.appendChild(srcTd);
+        tr.appendChild(td('text-muted small', e.receiver_ip || '—'));
+        tr.appendChild(makeSourceCell(e));
 
         const statusTd = document.createElement('td');
         const badge = document.createElement('span');
