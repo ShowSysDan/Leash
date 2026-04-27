@@ -131,27 +131,37 @@ def probe_camera(camera_id: int):
     cam = PTZCamera.query.get_or_404(camera_id)
     client = client_from_camera(cam, current_app.config)
 
-    probe_paths = [
+    # GET-able info endpoints
+    get_paths = ["/about", "/hostname"]
+    # POST-only control endpoints — probe with empty body
+    post_paths = [
         "/birddogptzcontrol",
         "/ptzControl",
         "/PTZControl",
         "/birddogfocuscontrol",
         "/focusControl",
         "/birddogRecallPreset",
-        "/about",
+        "/birddogSavePreset",
     ]
 
     async def _probe_all():
-        results = {}
-        for path in probe_paths:
-            code, _ = await client._get(path)
-            results[path] = code
-        return results
+        results = {"GET": {}, "POST": {}}
+        about_data = None
+        for path in get_paths:
+            code, data = await client._get(path)
+            results["GET"][path] = code
+            if path == "/about" and code == 200:
+                about_data = data
+        for path in post_paths:
+            code, _ = await client._post(path, {})
+            results["POST"][path] = code
+        return results, about_data
 
-    results = run_async(_probe_all())
+    results, about_data = run_async(_probe_all())
     return jsonify({
         "camera_ip": cam.ip_address,
         "port": current_app.config.get("NDI_DEVICE_PORT", 8080),
+        "about": about_data,
         "probes": results,
     })
 
@@ -182,13 +192,13 @@ def ptz_command(camera_id: int):
         return _err("Invalid pan/tilt/zoom value")
 
     client = client_from_camera(cam, current_app.config)
-    current_app.logger.info(
-        "PTZ %s: pan=%s tilt=%s zoom=%s speed=%d → %s:%s",
+    current_app.logger.warning(
+        "PTZ %s: pan=%s tilt=%s zoom=%s speed=%d → %s:%d",
         cam.display_name, pan, tilt, zoom, speed,
         cam.ip_address, current_app.config.get("NDI_DEVICE_PORT", 8080),
     )
     code, data = run_async(client.ptz_move(pan=pan, tilt=tilt, zoom=zoom, speed=speed))
-    current_app.logger.info("PTZ %s response: HTTP %d %s", cam.display_name, code, data)
+    current_app.logger.warning("PTZ %s response: HTTP %d %s", cam.display_name, code, data)
     return jsonify({"status": code, "response": data})
 
 
