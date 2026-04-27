@@ -343,8 +343,11 @@ class BirdDogClient:
         return await self.ptz_move("STOP", "STOP", "STOP")
 
     async def focus_control(self, action: str = "STOP") -> tuple[int, Any]:
-        """action: NEAR | FAR | STOP | AUTO"""
-        return await self._post("/birddogfocus", {"Focus": action.lower()})
+        """action: NEAR | FAR | STOP | AUTO — all sent to /birddogptz."""
+        if action == "AUTO":
+            return await self._post("/birddogptz", {"FocusMode": "Auto"})
+        focus_map = {"NEAR": "in", "FAR": "out", "STOP": "stop"}
+        return await self._post("/birddogptz", {"Focus": focus_map.get(action, "stop")})
 
     async def recall_preset(self, preset_number: int) -> tuple[int, Any]:
         return await self._post("/birddogptz", {"Recall-Preset": str(preset_number)})
