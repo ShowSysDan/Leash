@@ -73,7 +73,8 @@ Leash/
 ├── config.py                    # Dev / Production config classes
 ├── run.py                       # Dev entry point
 ├── requirements.txt
-├── leash.service                # systemd template unit (install as leash@.service)
+├── leash.service                # systemd unit reference (written by install.sh)
+├── install.sh                   # production install: service + systemctl
 ├── .env.example
 ├── CHANGELOG.md
 └── README.md
@@ -129,21 +130,17 @@ cp .env.example .env
 
 ### 2. Install the service
 
-`leash.service` is a systemd **template unit** — the instance name is the username that owns `~/Leash`.
-
 ```bash
-sudo cp ~/Leash/leash.service /etc/systemd/system/leash@.service
-sudo systemctl daemon-reload
-sudo systemctl enable leash@$USER
-sudo systemctl start leash@$USER
-sudo systemctl status leash@$USER
+sudo bash ~/Leash/install.sh
 ```
+
+The script writes a concrete `/etc/systemd/system/leash.service` with the correct user and paths, then enables and starts the service.
 
 ### 3. Logs
 
 ```bash
 # Service logs (stdout/stderr from gunicorn)
-sudo journalctl -u leash@$USER -f
+sudo journalctl -u leash -f
 
 # Audit log (source changes, discovery events, errors)
 journalctl -t leash -f
