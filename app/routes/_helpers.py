@@ -1,8 +1,5 @@
 """
 Shared helpers for Leash route blueprints.
-
-Deduplicates _err() (was copied into 5 blueprints) and provides input
-validators that are used at API boundaries.
 """
 import re
 
@@ -59,3 +56,6 @@ def valid_name(value, max_len: int = MAX_NAME) -> tuple[bool, str]:
     if not s or len(s) > max_len:
         return False, s
     return True, s
+
+
+from app.routes.auth import admin_required, login_required  # noqa: F401

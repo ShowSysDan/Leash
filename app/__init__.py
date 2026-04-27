@@ -7,6 +7,7 @@ from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
 
+from app.extensions import limiter
 from config import config
 
 db = SQLAlchemy()
@@ -110,6 +111,7 @@ def create_app(config_name: str = "default") -> Flask:
 
     db.init_app(app)
     migrate.init_app(app, db)
+    limiter.init_app(app)
 
     # Belt-and-suspenders: if a request raises, roll back any pending SA state
     # so the next request starts on a clean session. Flask-SQLAlchemy already
@@ -120,8 +122,10 @@ def create_app(config_name: str = "default") -> Flask:
         if exc is not None:
             db.session.rollback()
 
+    from app.routes.auth import auth_bp, init_auth
     from app.routes.main import main_bp
     from app.routes.api import api_bp
+    from app.routes.cameras_api import cameras_api_bp
     from app.routes.groups_api import groups_api_bp
     from app.routes.layouts_api import layouts_api_bp
     from app.routes.snapshots_api import snapshots_api_bp
@@ -129,8 +133,10 @@ def create_app(config_name: str = "default") -> Flask:
     from app.routes.schedules_api import schedules_api_bp
     from app.routes.settings_api import settings_api_bp
 
+    app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
     app.register_blueprint(api_bp, url_prefix="/api")
+    app.register_blueprint(cameras_api_bp, url_prefix="/api")
     app.register_blueprint(groups_api_bp, url_prefix="/api")
     app.register_blueprint(layouts_api_bp, url_prefix="/api")
     app.register_blueprint(snapshots_api_bp, url_prefix="/api")
@@ -140,6 +146,9 @@ def create_app(config_name: str = "default") -> Flask:
 
     from app.__version__ import __version__
     app.config["LEASH_VERSION"] = __version__
+
+    # Register auth before_request hooks and context processors
+    init_auth(app)
 
     _configure_syslog(app)
 

@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}{{ camera.display_name }} — Leash{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-3">
+  <div>
+    <a href="{{ url_for('main.cameras') }}" class="btn btn-sm btn-outline-secondary me-2">
+      <i class="bi bi-arrow-left me-1"></i>Cameras
+    </a>
+    <span class="fw-semibold fs-5">{{ camera.hostname or camera.label or '.' ~ camera.ip_last_octet }}</span>
+    {% if camera.model %}<span class="badge bg-secondary ms-2">{{ camera.model }}</span>{% endif %}
+    <span class="badge ms-1 bg-{{ 'success' if camera.status == 'online' else 'danger' if camera.status == 'offline' else 'secondary' }}">
+      {{ camera.status }}
+    </span>
+  </div>
+  <button class="btn btn-sm btn-outline-info" id="btn-poll-camera">
+    <i class="bi bi-arrow-repeat me-1"></i>Refresh Status
+  </button>
+</div>
+
+<div class="row g-3">
+
+  <!-- PTZ Control -->
+  <div class="col-lg-5">
+    <div class="card h-100">
+      <div class="card-header fw-semibold"><i class="bi bi-joystick me-2"></i>PTZ Control</div>
+      <div class="card-body">
+
+        <!-- Speed -->
+        <div class="d-flex align-items-center gap-2 mb-3">
+          <label class="form-label mb-0 text-nowrap small">Speed</label>
+          <input type="range" class="form-range" id="ptz-speed" min="1" max="24" value="8">
+          <span id="ptz-speed-val" class="small text-muted" style="min-width:2ch">8</span>
+        </div>
+
+        <!-- D-Pad -->
+        <div class="d-flex flex-column align-items-center gap-1 mb-3">
+          <button class="btn btn-outline-secondary ptz-btn" data-pan="STOP" data-tilt="UP" data-zoom="STOP"
+                  style="width:3rem;height:3rem" title="Tilt Up">
+            <i class="bi bi-chevron-up"></i>
+          </button>
+          <div class="d-flex gap-1">
+            <button class="btn btn-outline-secondary ptz-btn" data-pan="LEFT" data-tilt="STOP" data-zoom="STOP"
+                    style="width:3rem;height:3rem" title="Pan Left">
+              <i class="bi bi-chevron-left"></i>
+            </button>
+            <button class="btn btn-outline-danger ptz-stop-btn"
+                    style="width:3rem;height:3rem" title="Stop">
+              <i class="bi bi-stop-fill"></i>
+            </button>
+            <button class="btn btn-outline-secondary ptz-btn" data-pan="RIGHT" data-tilt="STOP" data-zoom="STOP"
+                    style="width:3rem;height:3rem" title="Pan Right">
+              <i class="bi bi-chevron-right"></i>
+            </button>
+          </div>
+          <button class="btn btn-outline-secondary ptz-btn" data-pan="STOP" data-tilt="DOWN" data-zoom="STOP"
+                  style="width:3rem;height:3rem" title="Tilt Down">
+            <i class="bi bi-chevron-down"></i>
+          </button>
+        </div>
+
+        <!-- Zoom -->
+        <div class="d-flex gap-2 justify-content-center mb-3">
+          <button class="btn btn-outline-secondary ptz-btn flex-grow-1" data-pan="STOP" data-tilt="STOP" data-zoom="WIDE"
+                  title="Zoom Wide">
+            <i class="bi bi-zoom-out me-1"></i>Wide
+          </button>
+          <button class="btn btn-outline-secondary ptz-btn flex-grow-1" data-pan="STOP" data-tilt="STOP" data-zoom="TELE"
+                  title="Zoom Tele">
+            <i class="bi bi-zoom-in me-1"></i>Tele
+          </button>
+        </div>
+
+        <!-- Focus -->
+        <hr class="my-2">
+        <div class="small text-muted mb-2">Focus</div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-sm btn-outline-secondary focus-btn flex-grow-1" data-action="NEAR">Near</button>
+          <button class="btn btn-sm btn-outline-secondary focus-btn flex-grow-1" data-action="FAR">Far</button>
+          <button class="btn btn-sm btn-outline-info focus-btn flex-grow-1" data-action="AUTO">Auto</button>
+          <button class="btn btn-sm btn-outline-danger focus-btn" data-action="STOP" title="Stop focus">■</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- Presets -->
+  <div class="col-lg-7">
+    <div class="card h-100">
+      <div class="card-header d-flex align-items-center justify-content-between fw-semibold">
+        <span><i class="bi bi-bookmarks me-2"></i>Presets</span>
+        <button class="btn btn-sm btn-outline-success" id="btn-save-preset-open">
+          <i class="bi bi-floppy me-1"></i>Save Current Position
+        </button>
+      </div>
+      <div class="card-body">
+
+        <!-- Save preset form (hidden until button clicked) -->
+        <div id="save-preset-form" class="card bg-dark border-success mb-3" style="display:none">
+          <div class="card-body py-2">
+            <div class="row g-2 align-items-end">
+              <div class="col-auto">
+                <label class="form-label small mb-1">Preset #</label>
+                <input type="number" class="form-control form-control-sm" id="save-preset-num"
+                       min="0" max="99" value="0" style="width:5rem">
+              </div>
+              <div class="col">
+                <label class="form-label small mb-1">Label</label>
+                <input type="text" class="form-control form-control-sm" id="save-preset-name"
+                       placeholder="e.g. Wide Shot" maxlength="100">
+              </div>
+              <div class="col-auto">
+                <button class="btn btn-sm btn-success" id="btn-save-preset-confirm">Save</button>
+                <button class="btn btn-sm btn-secondary" id="btn-save-preset-cancel">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Preset list -->
+        <div id="preset-list">
+          {% if camera.presets %}
+          {% for p in camera.presets %}
+          <div class="d-flex align-items-center gap-2 mb-2 preset-row" data-preset-num="{{ p.preset_number }}">
+            <span class="badge bg-secondary" style="min-width:2.5rem">{{ p.preset_number }}</span>
+            <span class="flex-grow-1 preset-name">{{ p.name }}</span>
+            <button class="btn btn-xs btn-outline-primary btn-recall-preset" data-preset-num="{{ p.preset_number }}">
+              Recall
+            </button>
+            <button class="btn btn-xs btn-outline-danger btn-delete-preset" data-preset-num="{{ p.preset_number }}">
+              <i class="bi bi-trash"></i>
+            </button>
+          </div>
+          {% endfor %}
+          {% else %}
+          <p class="text-muted small" id="no-presets-msg">No saved presets yet. Move the camera and click <em>Save Current Position</em>.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Advanced Settings -->
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header fw-semibold">
+        <a class="text-decoration-none text-light" data-bs-toggle="collapse" href="#advancedSettings">
+          <i class="bi bi-sliders me-2"></i>Advanced Picture Settings
+          <i class="bi bi-chevron-down ms-1 small"></i>
+        </a>
+      </div>
+      <div class="collapse" id="advancedSettings">
+        <div class="card-body">
+          <ul class="nav nav-tabs mb-3" id="settingsTabs">
+            {% for group in ['exposure','white_balance','picture','colour_matrix','detail','gamma'] %}
+            <li class="nav-item">
+              <button class="nav-link {% if loop.first %}active{% endif %} settings-tab"
+                      data-group="{{ group }}"
+                      data-bs-toggle="tab" data-bs-target="#tab-{{ group }}">
+                {{ group | replace('_',' ') | title }}
+              </button>
+            </li>
+            {% endfor %}
+          </ul>
+          <div class="tab-content">
+            {% for group in ['exposure','white_balance','picture','colour_matrix','detail','gamma'] %}
+            <div class="tab-pane {% if loop.first %}show active{% endif %}" id="tab-{{ group }}">
+              <div class="settings-loader text-muted small" data-group="{{ group }}" data-camera-id="{{ camera.id }}">
+                <span class="spinner-border spinner-border-sm me-1"></span>Loading…
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /row -->
+{% endblock %}
+
+{% block extra_js %}
+<script>
+window.LEASH = window.LEASH || {};
+window.LEASH.cameraId = {{ camera.id }};
+</script>
+<script src="{{ url_for('static', filename='js/camera.js') }}"></script>
+{% endblock %}

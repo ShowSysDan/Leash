@@ -65,6 +65,11 @@ SETTINGS_SCHEMA: list[dict] = [
          group="External API", label="API Key",
          description="Secret key for /api/v1/ endpoints. Leave empty for open access.",
          sensitive=True),
+    # Authentication
+    dict(key="AUTH_FORGOT_PASSWORD_URL", type="string", default="",
+         group="Authentication", label="Forgot Password URL",
+         description="URL of the external auth app where users can reset their password. "
+                     "Shown as a link on the login page and in must-change-password warnings."),
 ]
 
 _SCHEMA_MAP: dict[str, dict] = {s["key"]: s for s in SETTINGS_SCHEMA}

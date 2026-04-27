@@ -300,6 +300,42 @@ class BirdDogClient:
         return await self._post("/birddogsil2enc", data)
 
     # -------------------------------------------------------------------------
+    # Camera PTZ / focus / preset control
+    # -------------------------------------------------------------------------
+
+    async def ptz_move(
+        self,
+        pan: str = "STOP",
+        tilt: str = "STOP",
+        zoom: str = "STOP",
+        speed: int = 5,
+    ) -> tuple[int, Any]:
+        """Send a PTZ velocity command.
+        Pan:  LEFT | RIGHT | STOP
+        Tilt: UP   | DOWN  | STOP
+        Zoom: TELE | WIDE  | STOP
+        Speed: 1–24
+        """
+        s = str(max(1, min(24, speed)))
+        return await self._post("/ptzControl", {
+            "Pan": pan, "Tilt": tilt, "Zoom": zoom,
+            "PanSpeed": s, "TiltSpeed": s, "ZoomSpeed": s,
+        })
+
+    async def ptz_stop(self) -> tuple[int, Any]:
+        return await self.ptz_move("STOP", "STOP", "STOP")
+
+    async def focus_control(self, action: str = "STOP") -> tuple[int, Any]:
+        """action: NEAR | FAR | STOP | AUTO"""
+        return await self._post("/focusControl", {"Focus": action.upper()})
+
+    async def recall_preset(self, preset_number: int) -> tuple[int, Any]:
+        return await self._post("/birddogRecallPreset", {"PresetNum": str(preset_number)})
+
+    async def save_preset(self, preset_number: int) -> tuple[int, Any]:
+        return await self._post("/birddogSavePreset", {"PresetNum": str(preset_number)})
+
+    # -------------------------------------------------------------------------
     # Composite helpers
     # -------------------------------------------------------------------------
 
@@ -378,6 +414,11 @@ def client_from_ip(ip: str, app_config) -> "BirdDogClient":
 def client_from_receiver(receiver, app_config) -> "BirdDogClient":
     """Build a BirdDogClient for a receiver object (uses receiver.ip_address)."""
     return client_from_ip(receiver.ip_address, app_config)
+
+
+def client_from_camera(camera, app_config) -> "BirdDogClient":
+    """Build a BirdDogClient for a PTZCamera object."""
+    return client_from_ip(camera.ip_address, app_config)
 
 
 # ---------------------------------------------------------------------------

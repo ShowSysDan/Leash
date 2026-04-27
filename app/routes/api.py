@@ -9,6 +9,7 @@ Receiver endpoints
   DELETE /api/receivers/<id>              delete
   POST   /api/receivers/<id>/source       set NDI source
   POST   /api/receivers/<id>/reboot       reboot device
+  POST   /api/receivers/bulk-reboot       reboot all online devices
   POST   /api/receivers/<id>/restart      restart video subsystem
   GET    /api/receivers/<id>/status       poll live status from device
   GET    /api/receivers/bulk-reload       refresh status for every receiver
@@ -16,20 +17,22 @@ Receiver endpoints
   POST   /api/receivers/<id>/settings/<group>   set a settings group
 
 Scan endpoint
-  POST   /api/scan                        subnet scan for BirdDog PLAY devices
+  POST   /api/scan                        subnet scan — discovers decoders AND cameras
 
 Source endpoints
   GET    /api/sources                     list cached sources
   POST   /api/sources/discover            poll Tractus MV API and sync NDISource table
   DELETE /api/sources/<id>                remove cached source
 """
+import asyncio
 import logging
 from datetime import datetime
 
+import aiohttp
 from flask import Blueprint, current_app, jsonify, request
 
 from app import db
-from app.models import NDIReceiver, NDISource
+from app.models import NDIReceiver, NDISource, PTZCamera
 from app.services.audit_log import (
     device_error,
     receiver_added,
@@ -41,6 +44,7 @@ from app.services.audit_log import (
 )
 from app.routes._helpers import err as _err, valid_octet, MAX_LABEL
 from app.services.birddog_client import (
+    BirdDogClient,
     bulk_fetch_status,
     client_config,
     client_from_receiver,
@@ -160,24 +164,95 @@ def delete_receiver(receiver_id: int):
 
 
 # ---------------------------------------------------------------------------
-# Subnet scan — auto-detect BirdDog PLAY devices
+# Subnet scan — auto-detect decoders AND cameras
 # ---------------------------------------------------------------------------
+
+
+def _upsert_decoder(device: dict, now: datetime) -> tuple[str, object]:
+    """Upsert one decoder dict. Returns ('added'|'updated', obj)."""
+    octet = device["ip_last_octet"]
+    existing = NDIReceiver.query.filter_by(ip_last_octet=octet).first()
+    if existing:
+        for field in ("hostname", "hardware_version", "firmware_version",
+                      "serial_number", "mcu_version", "video_format",
+                      "network_config_method", "gateway", "network_mask", "fallback_ip"):
+            val = device.get(field)
+            if val:
+                setattr(existing, field, val)
+        existing.status = "online"
+        existing.last_seen = now
+        existing.updated_at = now
+        return "updated", existing
+    else:
+        index = int(octet) if octet.isdigit() else None
+        if index is None or NDIReceiver.query.filter_by(index=index).first():
+            index = (db.session.query(db.func.max(NDIReceiver.index)).scalar() or 0) + 1
+        recv = NDIReceiver(
+            index=index, ip_last_octet=octet, hostname=device["hostname"],
+            status="online", first_seen=now, last_seen=now,
+            hardware_version=device.get("hardware_version"),
+            firmware_version=device.get("firmware_version"),
+            serial_number=device.get("serial_number"),
+            mcu_version=device.get("mcu_version"),
+            video_format=device.get("video_format"),
+            network_config_method=device.get("network_config_method"),
+            gateway=device.get("gateway"),
+            network_mask=device.get("network_mask"),
+            fallback_ip=device.get("fallback_ip"),
+        )
+        db.session.add(recv)
+        db.session.flush()
+        return "added", recv
+
+
+def _upsert_camera(device: dict, now: datetime) -> tuple[str, object]:
+    """Upsert one camera dict. Returns ('added'|'updated', obj)."""
+    octet = device["ip_last_octet"]
+    existing = PTZCamera.query.filter_by(ip_last_octet=octet).first()
+    if existing:
+        for field in ("hostname", "model", "hardware_version", "firmware_version",
+                      "serial_number", "mcu_version", "network_config_method",
+                      "gateway", "network_mask"):
+            val = device.get(field)
+            if val:
+                setattr(existing, field, val)
+        existing.status = "online"
+        existing.last_seen = now
+        existing.updated_at = now
+        return "updated", existing
+    else:
+        index = int(octet) if octet.isdigit() else None
+        if index is None or PTZCamera.query.filter_by(index=index).first():
+            index = (db.session.query(db.func.max(PTZCamera.index)).scalar() or 0) + 1
+        cam = PTZCamera(
+            index=index, ip_last_octet=octet, hostname=device["hostname"],
+            model=device.get("model"), status="online", first_seen=now, last_seen=now,
+            hardware_version=device.get("hardware_version"),
+            firmware_version=device.get("firmware_version"),
+            serial_number=device.get("serial_number"),
+            mcu_version=device.get("mcu_version"),
+            network_config_method=device.get("network_config_method"),
+            gateway=device.get("gateway"),
+            network_mask=device.get("network_mask"),
+        )
+        db.session.add(cam)
+        db.session.flush()
+        return "added", cam
 
 
 @api_bp.route("/scan", methods=["POST"])
 def scan():
     """
-    Concurrently probe all 254 addresses on the configured subnet.
-    Devices that identify as BirdDog PLAY via /about are upserted into the DB.
-    Receivers already in the DB that were NOT found are marked offline.
-    Returns counts and full receiver list.
+    Concurrently probe the configured subnet.
+    Discovers BirdDog PLAY decoders AND PTZ cameras in one pass.
+    Both types are upserted; known devices not found are marked offline.
     """
     body = request.get_json(silent=True) or {}
     start = int(body.get("start", 1))
     end = int(body.get("end", 254))
 
     cfg = current_app.config
-    found = run_async(scan_subnet(
+    decoders, cameras = run_async(scan_subnet(
         prefix=cfg["NDI_SUBNET_PREFIX"],
         port=cfg["NDI_DEVICE_PORT"],
         password=cfg["NDI_DEVICE_PASSWORD"],
@@ -187,88 +262,55 @@ def scan():
     ))
 
     now = datetime.utcnow()
-    found_octets = {d["ip_last_octet"] for d in found}
-    added = []
-    updated = []
+    recv_added, recv_updated = [], []
+    cam_added = 0
 
-    for device in found:
-        octet = device["ip_last_octet"]
-        existing = NDIReceiver.query.filter_by(ip_last_octet=octet).first()
+    for d in decoders:
+        action, obj = _upsert_decoder(d, now)
+        (recv_added if action == "added" else recv_updated).append(obj)
+    for c in cameras:
+        action, _ = _upsert_camera(c, now)
+        if action == "added":
+            cam_added += 1
 
-        if existing:
-            existing.hostname = device["hostname"] or existing.hostname
-            existing.status = "online"
-            existing.hardware_version = device.get("hardware_version") or existing.hardware_version
-            existing.firmware_version = device.get("firmware_version") or existing.firmware_version
-            existing.serial_number = device.get("serial_number") or existing.serial_number
-            existing.mcu_version = device.get("mcu_version") or existing.mcu_version
-            existing.video_format = device.get("video_format") or existing.video_format
-            existing.network_config_method = device.get("network_config_method") or existing.network_config_method
-            existing.gateway = device.get("gateway") or existing.gateway
-            existing.network_mask = device.get("network_mask") or existing.network_mask
-            existing.fallback_ip = device.get("fallback_ip") or existing.fallback_ip
-            existing.last_seen = now
-            existing.updated_at = now
-            updated.append(existing)
-        else:
-            # Auto-assign index = last octet integer if not taken
-            index = int(octet) if octet.isdigit() else None
-            if index is None or NDIReceiver.query.filter_by(index=index).first():
-                max_idx = db.session.query(db.func.max(NDIReceiver.index)).scalar() or 0
-                index = max_idx + 1
-
-            new_recv = NDIReceiver(
-                index=index,
-                ip_last_octet=octet,
-                hostname=device["hostname"],
-                status="online",
-                hardware_version=device.get("hardware_version"),
-                firmware_version=device.get("firmware_version"),
-                serial_number=device.get("serial_number"),
-                mcu_version=device.get("mcu_version"),
-                video_format=device.get("video_format"),
-                network_config_method=device.get("network_config_method"),
-                gateway=device.get("gateway"),
-                network_mask=device.get("network_mask"),
-                fallback_ip=device.get("fallback_ip"),
-                last_seen=now,
-                first_seen=now,
-            )
-            db.session.add(new_recv)
-            db.session.flush()  # get the id before commit
-            added.append(new_recv)
-
-    # Collect receivers going offline before the bulk update so we can log them
+    # Mark decoders not found as offline
+    decoder_octets = {d["ip_last_octet"] for d in decoders}
     going_offline = NDIReceiver.query.filter(
-        NDIReceiver.ip_last_octet.notin_(found_octets),
+        NDIReceiver.ip_last_octet.notin_(decoder_octets),
         NDIReceiver.status == "online",
     ).all()
-
-    # Mark any known receiver that didn't respond as offline
     NDIReceiver.query.filter(
-        NDIReceiver.ip_last_octet.notin_(found_octets)
+        NDIReceiver.ip_last_octet.notin_(decoder_octets)
+    ).update({"status": "offline", "updated_at": now}, synchronize_session=False)
+
+    # Mark cameras not found as offline
+    camera_octets = {c["ip_last_octet"] for c in cameras}
+    PTZCamera.query.filter(
+        PTZCamera.ip_last_octet.notin_(camera_octets)
     ).update({"status": "offline", "updated_at": now}, synchronize_session=False)
 
     db.session.commit()
 
-    for r in added:
+    for r in recv_added:
         receiver_added(r.ip_address, r.hostname or "")
     for r in going_offline:
         receiver_went_offline(r.ip_address, r.hostname or "")
     scan_complete(
         scanned=end - start + 1,
-        found=len(found),
-        added=len(added),
-        updated=len(updated),
+        found=len(decoders) + len(cameras),
+        added=len(recv_added),
+        updated=len(recv_updated),
         offline=len(going_offline),
     )
 
     all_receivers = NDIReceiver.query.order_by(NDIReceiver.index).all()
     return jsonify({
         "scanned": end - start + 1,
-        "found": len(found),
-        "added": len(added),
-        "updated": len(updated),
+        "decoders_found": len(decoders),
+        "cameras_found": len(cameras),
+        "cameras_added": cam_added,
+        "added": len(recv_added),
+        "updated": len(recv_updated),
         "receivers": [r.to_dict() for r in all_receivers],
     })
 
@@ -314,6 +356,44 @@ def reboot_receiver(receiver_id: int):
     receiver = NDIReceiver.query.get_or_404(receiver_id)
     code, data = run_async(client_from_receiver(receiver, current_app.config).reboot())
     return jsonify({"status": code, "response": data})
+
+
+@api_bp.route("/receivers/bulk-reboot", methods=["POST"])
+def bulk_reboot():
+    """Reboot every online receiver concurrently."""
+    cfg = current_app.config
+    receivers = NDIReceiver.query.filter_by(status="online").order_by(NDIReceiver.index).all()
+    if not receivers:
+        return jsonify({"rebooted": 0, "failed": 0, "results": []})
+
+    concurrency = cfg.get("RECALL_CONCURRENCY", 10)
+    prefix   = cfg["NDI_SUBNET_PREFIX"]
+    port     = cfg["NDI_DEVICE_PORT"]
+    password = cfg["NDI_DEVICE_PASSWORD"]
+    timeout  = cfg["HTTP_TIMEOUT"]
+
+    async def _reboot_all():
+        sem = asyncio.Semaphore(concurrency)
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=timeout)
+        ) as session:
+            async def _one(recv):
+                async with sem:
+                    client = BirdDogClient(
+                        recv.ip_address, port=port, password=password,
+                        timeout=timeout, session=session,
+                    )
+                    code, _ = await client.reboot()
+                    return {"id": recv.id, "ip": recv.ip_address,
+                            "name": recv.display_name, "ok": code == 200, "status": code}
+            return await asyncio.gather(*[_one(r) for r in receivers], return_exceptions=False)
+
+    results = run_async(_reboot_all())
+    ok_count = sum(1 for r in results if r["ok"])
+    failed_count = len(results) - ok_count
+
+    logger.info("Bulk reboot: %d/%d receivers responded OK", ok_count, len(receivers))
+    return jsonify({"rebooted": ok_count, "failed": failed_count, "results": results})
 
 
 @api_bp.route("/receivers/<int:receiver_id>/restart", methods=["POST"])

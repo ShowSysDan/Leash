@@ -10,6 +10,7 @@ DB has been seeded) or in test environments where the DB might not exist.
 They are overwritten by the DB-persisted values on every subsequent startup.
 """
 import os
+from datetime import timedelta
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -61,6 +62,19 @@ class Config:
     ]
     TRACTUS_MV_PORT = int(os.environ.get("TRACTUS_MV_PORT", "8901"))
     API_KEY = os.environ.get("API_KEY") or None
+
+    # Authentication — cross-schema user lookup.
+    # Set to the Postgres schema name where the shared users table lives.
+    # Leave empty to disable authentication (dev/SQLite mode).
+    AUTH_DB_SCHEMA = os.environ.get("AUTH_DB_SCHEMA", "")
+    # URL of the external auth app shown on login page and in password-change warnings.
+    # Overridden at runtime by the DB setting AUTH_FORGOT_PASSWORD_URL.
+    AUTH_FORGOT_PASSWORD_URL = os.environ.get("AUTH_FORGOT_PASSWORD_URL", "")
+
+    # Session security
+    SESSION_COOKIE_HTTPONLY = True
+    SESSION_COOKIE_SAMESITE = "Lax"
+    PERMANENT_SESSION_LIFETIME = timedelta(hours=12)
 
 
 class DevelopmentConfig(Config):
