@@ -148,7 +148,7 @@
   cursor: pointer;
   padding: 0;
 }
-.lc-card:hover .lc-remove-btn { display: block; }
+.layout-canvas.edit-mode .lc-card:hover .lc-remove-btn { display: block; }
 
 /* Edit mode */
 .layout-canvas.edit-mode .lc-card {
@@ -188,6 +188,16 @@
   z-index: 100;
 }
 .layout-canvas.edit-mode .lc-label:hover .lc-remove-btn { display: block; }
+
+/* Multi-select highlight */
+.lc-card.lc-selected  { outline: 2px solid #00e5ff; outline-offset: 2px; }
+.lc-label.lc-selected { outline: 2px solid #00e5ff !important; outline-offset: 3px; }
+
+/* Snap-to-grid dot pattern */
+.layout-canvas.snap-grid {
+  background-image: radial-gradient(circle, rgba(255,255,255,0.18) 1px, transparent 1px);
+  background-size: 5% 5%;
+}
 
 /* ── Groups ── */
 .group-swatch {
