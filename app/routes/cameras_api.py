@@ -125,6 +125,37 @@ def camera_status(camera_id: int):
     return jsonify({"status": code, "camera": cam.to_dict(), "raw": data})
 
 
+@cameras_api_bp.route("/cameras/<int:camera_id>/probe", methods=["GET"])
+def probe_camera(camera_id: int):
+    """Probe which PTZ/focus endpoints the device responds to (for diagnostics)."""
+    cam = PTZCamera.query.get_or_404(camera_id)
+    client = client_from_camera(cam, current_app.config)
+
+    probe_paths = [
+        "/birddogptzcontrol",
+        "/ptzControl",
+        "/PTZControl",
+        "/birddogfocuscontrol",
+        "/focusControl",
+        "/birddogRecallPreset",
+        "/about",
+    ]
+
+    async def _probe_all():
+        results = {}
+        for path in probe_paths:
+            code, _ = await client._get(path)
+            results[path] = code
+        return results
+
+    results = run_async(_probe_all())
+    return jsonify({
+        "camera_ip": cam.ip_address,
+        "port": current_app.config.get("NDI_DEVICE_PORT", 8080),
+        "probes": results,
+    })
+
+
 # ---------------------------------------------------------------------------
 # PTZ control
 # ---------------------------------------------------------------------------
