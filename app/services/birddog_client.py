@@ -13,14 +13,16 @@ import aiohttp
 
 logger = logging.getLogger(__name__)
 
-# Some older BirdDog firmware uses different capitalisation on a handful of
-# endpoints.  The documented v2 paths are used here; set LEGACY_PATHS=True on
-# a BirdDogClient instance to switch to the older capitalisation if needed.
+# BirdDog firmware v2 uses birddog-prefixed, lowercase paths for camera control.
+# Older firmware uses /ptzControl and /focusControl without the prefix.
+# Set legacy_paths=True on a client instance if the device uses the older paths.
 LEGACY_PATH_MAP = {
     "/connectTo": "/ConnectTo",
     "/hostname": "/HostName",
-    "/List": "/List",  # unchanged
-    "/reset": "/reset",  # unchanged
+    "/List": "/List",           # unchanged
+    "/reset": "/reset",         # unchanged
+    "/birddogptzcontrol":   "/ptzControl",
+    "/birddogfocuscontrol": "/focusControl",
 }
 
 
@@ -317,7 +319,7 @@ class BirdDogClient:
         Speed: 1–24
         """
         s = str(max(1, min(24, speed)))
-        return await self._post("/ptzControl", {
+        return await self._post("/birddogptzcontrol", {
             "Pan": pan, "Tilt": tilt, "Zoom": zoom,
             "PanSpeed": s, "TiltSpeed": s, "ZoomSpeed": s,
         })
@@ -327,7 +329,7 @@ class BirdDogClient:
 
     async def focus_control(self, action: str = "STOP") -> tuple[int, Any]:
         """action: NEAR | FAR | STOP | AUTO"""
-        return await self._post("/focusControl", {"Focus": action.upper()})
+        return await self._post("/birddogfocuscontrol", {"Focus": action.upper()})
 
     async def recall_preset(self, preset_number: int) -> tuple[int, Any]:
         return await self._post("/birddogRecallPreset", {"PresetNum": str(preset_number)})
