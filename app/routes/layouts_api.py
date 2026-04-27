@@ -15,7 +15,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 
 from app import db
-from app.models import Layout, LayoutPosition
+from app.models import Layout, LayoutLabel, LayoutPosition
 from app.routes._helpers import (
     err as _err,
     valid_hex_color,
@@ -90,33 +90,66 @@ def delete_layout(layout_id: int):
 @layouts_api_bp.route("/layouts/<int:layout_id>/positions", methods=["PUT"])
 def save_positions(layout_id: int):
     """
-    Full replace of all positions.
-    Body: {"positions": [{"receiver_id": 1, "x_pct": 12.5, "y_pct": 38.0}, ...]}
+    Full replace of receiver positions; in-place update of label positions.
+    Body: {"positions": [...], "labels": [{"id": N, "x_pct": X, "y_pct": Y}, ...]}
     """
     layout = Layout.query.get_or_404(layout_id)
     body = request.get_json(silent=True) or {}
     positions_data = body.get("positions", [])
+    labels_data = body.get("labels", [])
 
-    # Delete existing, re-create
+    # Full replace of receiver positions
     LayoutPosition.query.filter_by(layout_id=layout_id).delete()
-
-    created = []
     for p in positions_data:
         rid = p.get("receiver_id")
         if not rid:
             continue
-        pos = LayoutPosition(
+        db.session.add(LayoutPosition(
             layout_id=layout_id,
             receiver_id=int(rid),
             x_pct=float(p.get("x_pct", 0)),
             y_pct=float(p.get("y_pct", 0)),
-        )
-        db.session.add(pos)
-        created.append(pos)
+        ))
+
+    # Update label positions in-place
+    for ld in labels_data:
+        lid = ld.get("id")
+        if not lid:
+            continue
+        label = LayoutLabel.query.filter_by(id=int(lid), layout_id=layout_id).first()
+        if label:
+            label.x_pct = float(ld.get("x_pct", label.x_pct))
+            label.y_pct = float(ld.get("y_pct", label.y_pct))
 
     layout.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify(layout.to_dict(include_positions=True))
+
+
+@layouts_api_bp.route("/layouts/<int:layout_id>/labels", methods=["POST"])
+def add_label(layout_id: int):
+    Layout.query.get_or_404(layout_id)
+    body = request.get_json(silent=True) or {}
+    text = str(body.get("text", "")).strip()[:200]
+    if not text:
+        return _err("text is required")
+    label = LayoutLabel(
+        layout_id=layout_id,
+        text=text,
+        x_pct=float(body.get("x_pct", 5.0)),
+        y_pct=float(body.get("y_pct", 5.0)),
+    )
+    db.session.add(label)
+    db.session.commit()
+    return jsonify(label.to_dict()), 201
+
+
+@layouts_api_bp.route("/layouts/<int:layout_id>/labels/<int:label_id>", methods=["DELETE"])
+def delete_label(layout_id: int, label_id: int):
+    label = LayoutLabel.query.filter_by(id=label_id, layout_id=layout_id).first_or_404()
+    db.session.delete(label)
+    db.session.commit()
+    return jsonify({"deleted": label_id})
 
 
 @layouts_api_bp.route("/layouts/<int:layout_id>/receivers", methods=["POST"])

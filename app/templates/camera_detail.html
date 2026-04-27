@@ -118,24 +118,22 @@
           </div>
         </div>
 
-        <!-- Preset list -->
+        <!-- Preset list: slots 0–9 always visible; labeled slots show name + delete -->
         <div id="preset-list">
-          {% if camera.presets %}
-          {% for p in camera.presets %}
-          <div class="d-flex align-items-center gap-2 mb-2 preset-row" data-preset-num="{{ p.preset_number }}">
-            <span class="badge bg-secondary" style="min-width:2.5rem">{{ p.preset_number }}</span>
-            <span class="flex-grow-1 preset-name">{{ p.name }}</span>
-            <button class="btn btn-xs btn-outline-primary btn-recall-preset" data-preset-num="{{ p.preset_number }}">
+          {% for i in range(10) %}
+          <div class="d-flex align-items-center gap-2 mb-2 preset-row" data-preset-num="{{ i }}">
+            <span class="badge bg-secondary" style="min-width:2.5rem">{{ i }}</span>
+            <span class="flex-grow-1 preset-name">{{ preset_map.get(i, '') }}</span>
+            <button class="btn btn-xs btn-outline-primary btn-recall-preset" data-preset-num="{{ i }}">
               Recall
             </button>
-            <button class="btn btn-xs btn-outline-danger btn-delete-preset" data-preset-num="{{ p.preset_number }}">
+            {% if i in preset_map %}
+            <button class="btn btn-xs btn-outline-danger btn-delete-preset" data-preset-num="{{ i }}">
               <i class="bi bi-trash"></i>
             </button>
+            {% endif %}
           </div>
           {% endfor %}
-          {% else %}
-          <p class="text-muted small" id="no-presets-msg">No saved presets yet. Move the camera and click <em>Save Current Position</em>.</p>
-          {% endif %}
         </div>
       </div>
     </div>

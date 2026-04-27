@@ -102,7 +102,6 @@ window.Leash = (() => {
       const cur = sel.value;
       while (sel.options.length > 1) sel.remove(1);
       sourceNames.forEach(n => sel.add(new Option(n, n)));
-      sel.add(new Option('⚡ Reboot Device', 'Reboot'));
       if (cur) sel.value = cur;
     });
   }
@@ -287,8 +286,8 @@ window.Leash = (() => {
     if (!confirm('Reboot this device?')) return;
     const resp = await fetch(`/api/receivers/${receiverId}/reboot`, { method: 'POST' });
     const data = await resp.json();
-    toast(data.status === 200 ? 'Reboot initiated' : `Reboot failed (${data.status})`,
-          data.status === 200 ? 'warning' : 'danger');
+    const ok = data.status === 200 || data.status === 0;
+    toast(ok ? 'Reboot initiated' : `Reboot failed (${data.status})`, ok ? 'warning' : 'danger');
   }
 
   async function rebootAll() {

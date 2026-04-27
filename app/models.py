@@ -123,6 +123,10 @@ class Layout(db.Model):
         "LayoutPosition", backref="layout",
         cascade="all, delete-orphan", lazy="joined"
     )
+    labels = db.relationship(
+        "LayoutLabel", backref="layout",
+        cascade="all, delete-orphan", lazy="joined"
+    )
 
     def to_dict(self, include_positions: bool = False) -> dict:
         d = {
@@ -135,6 +139,7 @@ class Layout(db.Model):
         }
         if include_positions:
             d["positions"] = [p.to_dict() for p in self.positions]
+            d["labels"] = [l.to_dict() for l in self.labels]
         return d
 
 
@@ -161,6 +166,19 @@ class LayoutPosition(db.Model):
             "y_pct": self.y_pct,
             "receiver": r.to_dict() if r else None,
         }
+
+
+class LayoutLabel(db.Model):
+    __tablename__ = "layout_labels"
+
+    id = db.Column(db.Integer, primary_key=True)
+    layout_id = db.Column(db.Integer, db.ForeignKey("layouts.id", ondelete="CASCADE"), nullable=False)
+    text = db.Column(db.String(200), nullable=False)
+    x_pct = db.Column(db.Float, default=5.0)
+    y_pct = db.Column(db.Float, default=5.0)
+
+    def to_dict(self) -> dict:
+        return {"id": self.id, "text": self.text, "x_pct": self.x_pct, "y_pct": self.y_pct}
 
 
 # ── Snapshots ─────────────────────────────────────────────────────────────

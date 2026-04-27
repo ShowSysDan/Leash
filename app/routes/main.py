@@ -72,7 +72,8 @@ def cameras():
 @main_bp.route("/cameras/<int:camera_id>")
 def camera_detail(camera_id: int):
     cam = PTZCamera.query.get_or_404(camera_id)
-    return render_template("camera_detail.html", camera=cam)
+    preset_map = {p.preset_number: p.name for p in cam.presets}
+    return render_template("camera_detail.html", camera=cam, preset_map=preset_map)
 
 
 @main_bp.route("/schedules")
