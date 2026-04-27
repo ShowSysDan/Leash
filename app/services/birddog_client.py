@@ -347,10 +347,10 @@ class BirdDogClient:
         return await self._post("/birddogfocus", {"Focus": action.lower()})
 
     async def recall_preset(self, preset_number: int) -> tuple[int, Any]:
-        return await self._post("/birddogRecallPreset", {"PresetNum": str(preset_number)})
+        return await self._post("/birddogptz", {"Recall-Preset": str(preset_number)})
 
     async def save_preset(self, preset_number: int) -> tuple[int, Any]:
-        return await self._post("/birddogSavePreset", {"PresetNum": str(preset_number)})
+        return await self._post("/birddogptz", {"Save-Preset": str(preset_number)})
 
     # -------------------------------------------------------------------------
     # Composite helpers
