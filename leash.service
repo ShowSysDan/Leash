@@ -5,15 +5,14 @@ After=network.target
 StartLimitAction=none
 
 [Service]
-# Run as the user who owns ~/Leash
 User=%i
 Group=%i
-WorkingDirectory=%h/Leash
-EnvironmentFile=%h/Leash/.env
+WorkingDirectory=/home/%i/Leash
+EnvironmentFile=/home/%i/Leash/.env
 
 # Single worker + threads so the background scheduler fires exactly once.
 # --threads 4 handles concurrent HTTP requests without multiple processes.
-ExecStart=%h/Leash/venv/bin/gunicorn \
+ExecStart=/home/%i/Leash/venv/bin/gunicorn \
     --workers 1 \
     --threads 4 \
     --bind 0.0.0.0:5000 \

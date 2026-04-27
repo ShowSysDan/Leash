@@ -73,7 +73,7 @@ Leash/
 ├── config.py                    # Dev / Production config classes
 ├── run.py                       # Dev entry point
 ├── requirements.txt
-├── leash.service                # systemd service template
+├── leash.service                # systemd template unit (install as leash@.service)
 ├── .env.example
 ├── CHANGELOG.md
 └── README.md
@@ -129,27 +129,21 @@ cp .env.example .env
 
 ### 2. Install the service
 
-```bash
-mkdir -p ~/.config/systemd/user
-cp ~/Leash/leash.service ~/.config/systemd/user/leash.service
-
-systemctl --user daemon-reload
-systemctl --user enable leash
-systemctl --user start leash
-systemctl --user status leash
-```
-
-To start automatically at boot without a login session:
+`leash.service` is a systemd **template unit** — the instance name is the username that owns `~/Leash`.
 
 ```bash
-sudo loginctl enable-linger $USER
+sudo cp ~/Leash/leash.service /etc/systemd/system/leash@.service
+sudo systemctl daemon-reload
+sudo systemctl enable leash@$USER
+sudo systemctl start leash@$USER
+sudo systemctl status leash@$USER
 ```
 
 ### 3. Logs
 
 ```bash
 # Service logs (stdout/stderr from gunicorn)
-journalctl --user -u leash -f
+sudo journalctl -u leash@$USER -f
 
 # Audit log (source changes, discovery events, errors)
 journalctl -t leash -f
