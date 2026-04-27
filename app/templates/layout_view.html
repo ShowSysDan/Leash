@@ -11,6 +11,9 @@
     <button id="btn-add-to-layout" class="btn btn-sm btn-outline-success">
       <i class="bi bi-plus-circle me-1"></i>Add Receiver
     </button>
+    <button id="btn-add-text" class="btn btn-sm btn-outline-info">
+      <i class="bi bi-fonts me-1"></i>Add Text
+    </button>
     <div class="btn-group btn-group-sm">
       <button id="btn-view-mode" class="btn btn-primary active" title="View / control mode">
         <i class="bi bi-display me-1"></i>View
@@ -79,6 +82,7 @@ window.LEASH.layoutId = {{ layout.id }};
 window.LEASH.layoutBg = {{ layout.bg_color | tojson }};
 window.LEASH.sources = {{ sources | map(attribute='name') | list | tojson }};
 window.LEASH.positions = {{ layout.to_dict(include_positions=True)['positions'] | tojson }};
+window.LEASH.labels    = {{ layout.to_dict(include_positions=True)['labels']    | tojson }};
 </script>
 <script src="{{ url_for('static', filename='js/layout.js') }}"></script>
 {% endblock %}

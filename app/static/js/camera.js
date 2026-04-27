@@ -13,12 +13,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   async function api(path, body) {
-    const resp = await fetch(`/api/cameras/${cameraId}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    return resp.json();
+    try {
+      const resp = await fetch(`/api/cameras/${cameraId}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const text = await resp.text();
+      try { return JSON.parse(text); } catch { return { status: resp.status }; }
+    } catch (err) {
+      toast(`Request failed: ${err.message}`, 'danger');
+      return { status: 0 };
+    }
   }
 
   // ── Speed slider ───────────────────────────────────────────────────────────
@@ -39,7 +45,8 @@ document.addEventListener('DOMContentLoaded', () => {
   async function ptzStop() {
     if (!ptzActive) return;
     ptzActive = false;
-    await api('/ptz', { pan: 'STOP', tilt: 'STOP', zoom: 'STOP', speed: 1 });
+    const d = await api('/ptz', { pan: 'STOP', tilt: 'STOP', zoom: 'STOP', speed: 1 });
+    if (d?.status && d.status !== 200) toast(`PTZ error (HTTP ${d.status})`, 'danger');
   }
 
   document.querySelectorAll('.ptz-btn').forEach(btn => {
@@ -120,14 +127,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!confirm(`Delete label for preset ${num}?`)) return;
         const resp = await fetch(`/api/cameras/${cameraId}/presets/${num}`, { method: 'DELETE' });
         if (resp.ok) {
-          btn.closest('.preset-row').remove();
-          if (!document.querySelector('.preset-row')) {
-            const msg = document.createElement('p');
-            msg.id = 'no-presets-msg';
-            msg.className = 'text-muted small';
-            msg.textContent = 'No saved presets yet.';
-            document.getElementById('preset-list').appendChild(msg);
-          }
+          btn.closest('.preset-row').querySelector('.preset-name').textContent = '';
+          btn.remove();
           toast(`Preset ${num} label removed`, 'warning');
         } else {
           toast('Delete failed', 'danger');
@@ -155,13 +156,21 @@ document.addEventListener('DOMContentLoaded', () => {
     if (d.status === 200) {
       toast(`Preset ${num} saved`, 'success');
       document.getElementById('save-preset-form').style.display = 'none';
-      // Update or add row in preset list
-      const noMsg = document.getElementById('no-presets-msg');
-      if (noMsg) noMsg.remove();
 
       let row = document.querySelector(`.preset-row[data-preset-num="${num}"]`);
       if (row) {
         row.querySelector('.preset-name').textContent = name;
+        // Add delete button if not already present
+        if (!row.querySelector('.btn-delete-preset')) {
+          const delBtn = document.createElement('button');
+          delBtn.className = 'btn btn-xs btn-outline-danger btn-delete-preset';
+          delBtn.dataset.presetNum = num;
+          const icon = document.createElement('i');
+          icon.className = 'bi bi-trash';
+          delBtn.appendChild(icon);
+          row.appendChild(delBtn);
+          bindPresetButtons();
+        }
       } else {
         row = document.createElement('div');
         row.className = 'd-flex align-items-center gap-2 mb-2 preset-row';

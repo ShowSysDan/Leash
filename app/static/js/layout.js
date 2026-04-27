@@ -11,6 +11,8 @@ document.addEventListener('DOMContentLoaded', () => {
   let editMode    = false;
   let dragging    = null;   // { el, offsetX, offsetY }
 
+  let labels      = window.LEASH?.labels || [];
+
   const canvas    = document.getElementById('layout-canvas');
   const saveBtn   = document.getElementById('btn-save-layout');
 
@@ -26,7 +28,6 @@ document.addEventListener('DOMContentLoaded', () => {
       if (name === current) opt.selected = true;
       select.appendChild(opt);
     });
-    select.appendChild(new Option('⚡ Reboot', 'Reboot'));
   }
 
   // ── Render a single card ────────────────────────────────────────────────
@@ -114,10 +115,57 @@ document.addEventListener('DOMContentLoaded', () => {
     return div;
   }
 
+  // ── Render a text label card ─────────────────────────────────────────────
+  function makeLabelCard(label) {
+    const div = document.createElement('div');
+    div.className = 'lc-label';
+    div.dataset.labelId   = label.id;
+    div.dataset.labelText = label.text;
+    div.style.left = `${label.x_pct}%`;
+    div.style.top  = `${label.y_pct}%`;
+
+    const textEl = document.createElement('span');
+    textEl.className = 'lc-label-text';
+    textEl.textContent = label.text;
+    div.appendChild(textEl);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'lc-remove-btn';
+    removeBtn.title = 'Remove text label';
+    removeBtn.textContent = '×';
+    div.appendChild(removeBtn);
+
+    removeBtn.addEventListener('click', async () => {
+      if (!confirm('Remove this text label?')) return;
+      const resp = await fetch(`/api/layouts/${layoutId}/labels/${label.id}`, { method: 'DELETE' });
+      if (resp.ok) {
+        div.remove();
+        labels = labels.filter(l => l.id !== label.id);
+        window.Leash.toast('Label removed', 'info');
+      }
+    });
+
+    div.addEventListener('mousedown', e => {
+      if (!editMode) return;
+      if (e.target.closest('button')) return;
+      dragging = {
+        el: div,
+        offsetX: e.clientX - div.getBoundingClientRect().left,
+        offsetY: e.clientY - div.getBoundingClientRect().top,
+        labelId: label.id,
+      };
+      div.classList.add('dragging');
+      e.preventDefault();
+    });
+
+    return div;
+  }
+
   // ── Render all cards ────────────────────────────────────────────────────
   function renderAll() {
-    canvas.querySelectorAll('.lc-card').forEach(c => c.remove());
+    canvas.querySelectorAll('.lc-card, .lc-label').forEach(c => c.remove());
     positions.forEach(pos => canvas.appendChild(makeCard(pos)));
+    labels.forEach(label => canvas.appendChild(makeLabelCard(label)));
   }
 
   renderAll();
@@ -136,13 +184,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.addEventListener('mouseup', () => {
     if (!dragging) return;
-    // Update local positions array
-    const el   = dragging.el;
-    const rid  = dragging.receiverId;
-    const x    = parseFloat(el.style.left);
-    const y    = parseFloat(el.style.top);
-    const pos  = positions.find(p => p.receiver_id === rid);
-    if (pos) { pos.x_pct = x; pos.y_pct = y; }
+    const el = dragging.el;
+    const x  = parseFloat(el.style.left);
+    const y  = parseFloat(el.style.top);
+    if (dragging.labelId !== undefined) {
+      const label = labels.find(l => l.id === dragging.labelId);
+      if (label) { label.x_pct = x; label.y_pct = y; }
+    } else {
+      const pos = positions.find(p => p.receiver_id === dragging.receiverId);
+      if (pos) { pos.x_pct = x; pos.y_pct = y; }
+    }
     el.classList.remove('dragging');
     dragging = null;
   });
@@ -166,21 +217,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ── Save positions ───────────────────────────────────────────────────────
   saveBtn?.addEventListener('click', async () => {
-    // Read current card positions from DOM
     const payload = Array.from(canvas.querySelectorAll('.lc-card')).map(card => ({
       receiver_id: parseInt(card.dataset.receiverId),
       x_pct: parseFloat(card.style.left),
       y_pct: parseFloat(card.style.top),
     }));
+    const labelPayload = Array.from(canvas.querySelectorAll('.lc-label')).map(el => ({
+      id: parseInt(el.dataset.labelId),
+      x_pct: parseFloat(el.style.left),
+      y_pct: parseFloat(el.style.top),
+    }));
 
     const resp = await fetch(`/api/layouts/${layoutId}/positions`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ positions: payload }),
+      body: JSON.stringify({ positions: payload, labels: labelPayload }),
     });
     const data = await resp.json();
     if (resp.ok) {
       positions = data.positions || [];
+      labels    = data.labels    || [];
       window.Leash.toast('Layout saved', 'success');
     } else {
       window.Leash.toast('Save failed', 'danger');
@@ -206,6 +262,23 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     window.Leash.toast(`Added ${checked.length} receiver(s)`, 'success');
     setTimeout(() => location.reload(), 500);
+  });
+
+  // ── Add text label ───────────────────────────────────────────────────────
+  document.getElementById('btn-add-text')?.addEventListener('click', async () => {
+    const text = prompt('Enter text:');
+    if (!text?.trim()) return;
+    const resp = await fetch(`/api/layouts/${layoutId}/labels`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text.trim(), x_pct: 5, y_pct: 5 }),
+    });
+    if (resp.ok) {
+      const label = await resp.json();
+      labels.push(label);
+      canvas.appendChild(makeLabelCard(label));
+      window.Leash.toast('Text added — switch to Edit mode to drag it', 'info');
+    }
   });
 
   // ── Periodic poll — update hostnames and source selections ───────────────
