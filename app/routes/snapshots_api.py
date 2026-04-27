@@ -149,3 +149,14 @@ def delete_snapshot(snap_id: int):
     db.session.delete(snap)
     db.session.commit()
     return jsonify({"deleted": snap_id})
+
+
+@snapshots_api_bp.route("/snapshots/<int:snap_id>/entries/<int:entry_id>", methods=["PATCH"])
+def update_entry(snap_id: int, entry_id: int):
+    """Update the saved source_name on a single snapshot entry."""
+    Snapshot.query.get_or_404(snap_id)
+    entry = SnapshotEntry.query.filter_by(id=entry_id, snapshot_id=snap_id).first_or_404()
+    body = request.get_json(silent=True) or {}
+    entry.source_name = str(body.get("source_name", "")).strip()
+    db.session.commit()
+    return jsonify(entry.to_dict())

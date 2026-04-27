@@ -435,6 +435,7 @@ def _sync_tractus_sources(app) -> None:
         from app.models import NDISource
         from app.services.audit_log import sources_discovered
         from app.services.tractus_client import fetch_sources
+        from app.services.birddog_client import run_async
 
         cfg = app.config
         hosts = cfg.get("TRACTUS_MV_HOSTS", ["10.1.248.191", "10.1.248.192"])
@@ -510,7 +511,7 @@ def _poll_receiver_sources(app) -> None:
     with app.app_context():
         from app import db
         from app.models import NDIReceiver
-        from app.services.birddog_client import bulk_fetch_source, client_config
+        from app.services.birddog_client import bulk_fetch_source, client_config, run_async
 
         receivers = NDIReceiver.query.all()
         if not receivers:

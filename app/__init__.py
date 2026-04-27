@@ -74,7 +74,7 @@ def _auto_migrate(app: Flask) -> None:
     Handles three cases:
     1. No migrations/ directory yet  → init + generate initial migration + upgrade
     2. migrations/ exists but no version files → generate initial migration + upgrade
-    3. Normal case → upgrade only (no-op if already current)
+    3. Normal case → detect schema drift, generate migration if needed, upgrade
     """
     from flask_migrate import upgrade
     from flask_migrate import init as flask_db_init
@@ -93,12 +93,31 @@ def _auto_migrate(app: Flask) -> None:
         elif not versions_dir.exists() or not list(versions_dir.glob("*.py")):
             logger.info("Leash: generating initial migration")
             flask_db_migrate(message="initial schema")
+        else:
+            # Check if the live models differ from what the DB has.
+            # If so, auto-generate a migration so new tables/columns appear.
+            if _schema_has_changes(app):
+                logger.info("Leash: schema drift detected — generating migration")
+                flask_db_migrate(message="auto schema update")
 
         logger.info("Leash: applying pending migrations")
         upgrade()
     except Exception:
         logger.exception("Leash: auto-migration failed — check the database connection")
         raise
+
+
+def _schema_has_changes(app: Flask) -> bool:
+    """Return True if SQLAlchemy models differ from the current DB schema."""
+    try:
+        from alembic.runtime.migration import MigrationContext
+        from alembic.autogenerate import compare_metadata
+        with db.engine.connect() as conn:
+            ctx = MigrationContext.configure(conn)
+            diffs = compare_metadata(ctx, db.metadata)
+            return bool(diffs)
+    except Exception:
+        return False
 
 
 def create_app(config_name: str = "default") -> Flask:
