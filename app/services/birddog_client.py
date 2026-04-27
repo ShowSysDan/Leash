@@ -88,14 +88,19 @@ class BirdDogClient:
         """Single code path for GET and POST — uses the shared session if set,
         else spins up a short-lived one."""
         url = f"{self.base_url}{self._path(endpoint)}"
+        logger.debug("%s %s", method, url)
         try:
             if self._session is not None:
                 async with self._session.request(method, url, **kwargs) as resp:
                     text = await resp.text()
+                    if resp.status not in (200, 201):
+                        logger.warning("%s %s → HTTP %d: %.200s", method, url, resp.status, text)
                     return resp.status, _try_json(text)
             async with aiohttp.ClientSession(timeout=self.timeout) as session:
                 async with session.request(method, url, **kwargs) as resp:
                     text = await resp.text()
+                    if resp.status not in (200, 201):
+                        logger.warning("%s %s → HTTP %d: %.200s", method, url, resp.status, text)
                     return resp.status, _try_json(text)
         except asyncio.TimeoutError:
             logger.warning("Timeout %s %s", method, url)
