@@ -431,10 +431,9 @@ def client_from_ip(ip: str, app_config) -> "BirdDogClient":
 def ptz_client_from_camera(camera, app_config) -> "BirdDogClient":
     """Build a BirdDogClient for PTZ/focus/preset control on a PTZ camera.
 
-    BirdDog cameras expose PTZ control on port 6791 (separate from the
-    NDI device REST API on port 8080).  CAMERA_PTZ_PORT overrides this.
+    Uses CAMERA_PTZ_PORT if set, otherwise falls back to NDI_DEVICE_PORT (8080).
     """
-    ptz_port = app_config.get("CAMERA_PTZ_PORT", 6791)
+    ptz_port = app_config.get("CAMERA_PTZ_PORT") or app_config.get("NDI_DEVICE_PORT", 8080)
     return BirdDogClient(
         ip=camera.ip_address,
         port=ptz_port,
