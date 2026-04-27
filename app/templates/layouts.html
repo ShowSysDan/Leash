@@ -6,7 +6,12 @@
   <h4 class="mb-0 text-light"><i class="bi bi-layout-three-columns me-2"></i>Layouts
     <span class="badge bg-secondary ms-1">{{ layouts|length }}</span>
   </h4>
-  <div class="ms-auto">
+  <div class="ms-auto d-flex gap-2">
+    {% if layouts %}
+    <button class="btn btn-sm btn-outline-info" id="btn-generate-all-groups">
+      <i class="bi bi-people me-1"></i>Generate All Groups
+    </button>
+    {% endif %}
     <button class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#createLayoutModal">
       <i class="bi bi-plus-circle me-1"></i>New Layout
     </button>
@@ -43,6 +48,11 @@
                class="btn btn-xs btn-primary" title="Open layout">
               <i class="bi bi-arrows-fullscreen"></i>
             </a>
+            <button class="btn btn-xs btn-outline-info btn-gen-group"
+                    data-layout-id="{{ layout.id }}" data-layout-name="{{ layout.name }}"
+                    title="Generate receiver group from this layout">
+              <i class="bi bi-people"></i>
+            </button>
             <button class="btn btn-xs btn-outline-danger btn-delete-layout"
                     data-layout-id="{{ layout.id }}" data-layout-name="{{ layout.name }}">
               <i class="bi bi-trash"></i>
@@ -117,6 +127,43 @@ document.querySelectorAll('.btn-delete-layout').forEach(btn => {
       window.Leash.toast('Layout deleted', 'warning');
     }
   });
+});
+
+async function generateGroup(layoutId, layoutName) {
+  const resp = await fetch(`/api/layouts/${layoutId}/generate-group`, { method: 'POST' });
+  const data = await resp.json();
+  if (resp.ok) {
+    window.Leash.toast(
+      `Group "${layoutName}" ${data.action} (${data.receiver_count} receivers)`,
+      'success'
+    );
+  } else {
+    window.Leash.toast(data.error || 'Failed to generate group', 'danger');
+  }
+}
+
+document.querySelectorAll('.btn-gen-group').forEach(btn => {
+  btn.addEventListener('click', () => generateGroup(btn.dataset.layoutId, btn.dataset.layoutName));
+});
+
+document.getElementById('btn-generate-all-groups')?.addEventListener('click', async () => {
+  const btns = document.querySelectorAll('.btn-gen-group');
+  let created = 0, updated = 0, failed = 0;
+  for (const btn of btns) {
+    const resp = await fetch(`/api/layouts/${btn.dataset.layoutId}/generate-group`, { method: 'POST' });
+    if (resp.ok) {
+      const d = await resp.json();
+      if (d.action === 'created') created++; else updated++;
+    } else {
+      failed++;
+    }
+  }
+  const msg = [
+    created && `${created} created`,
+    updated && `${updated} updated`,
+    failed  && `${failed} failed`,
+  ].filter(Boolean).join(', ');
+  window.Leash.toast(`Groups: ${msg}`, failed ? 'warning' : 'success');
 });
 </script>
 {% endblock %}

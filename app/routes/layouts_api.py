@@ -7,6 +7,7 @@ GET    /api/layouts/<id>                    get layout with positions
 PUT    /api/layouts/<id>                    update name / description / bg_color
 DELETE /api/layouts/<id>                    delete layout
 PUT    /api/layouts/<id>/positions          save all positions at once (full replace)
+POST   /api/layouts/<id>/generate-group     create/sync a receiver group from layout
 POST   /api/layouts/<id>/receivers          add a receiver to layout (default pos 10,10)
 DELETE /api/layouts/<id>/receivers/<rid>    remove receiver from layout
 """
@@ -15,7 +16,7 @@ from datetime import datetime
 from flask import Blueprint, jsonify, request
 
 from app import db
-from app.models import Layout, LayoutLabel, LayoutPosition
+from app.models import Layout, LayoutLabel, LayoutPosition, NDIReceiver, ReceiverGroup
 from app.routes._helpers import (
     err as _err,
     valid_hex_color,
@@ -124,6 +125,31 @@ def save_positions(layout_id: int):
     layout.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify(layout.to_dict(include_positions=True))
+
+
+@layouts_api_bp.route("/layouts/<int:layout_id>/generate-group", methods=["POST"])
+def generate_group(layout_id: int):
+    """Create or update a ReceiverGroup matching the layout's name and receivers."""
+    layout = Layout.query.get_or_404(layout_id)
+    receiver_ids = [p.receiver_id for p in layout.positions]
+    receivers = NDIReceiver.query.filter(NDIReceiver.id.in_(receiver_ids)).all() if receiver_ids else []
+
+    group = ReceiverGroup.query.filter_by(name=layout.name).first()
+    if group:
+        group.receivers = receivers
+        action = "updated"
+    else:
+        group = ReceiverGroup(
+            name=layout.name,
+            description=f"Auto-generated from layout: {layout.name}",
+        )
+        group.receivers = receivers
+        db.session.add(group)
+        action = "created"
+
+    db.session.commit()
+    return jsonify({"action": action, "group": group.to_dict(include_receivers=False),
+                    "receiver_count": len(receivers)})
 
 
 @layouts_api_bp.route("/layouts/<int:layout_id>/labels", methods=["POST"])
