@@ -108,13 +108,15 @@ def get_scheduler() -> BackgroundScheduler | None:
 # ---------------------------------------------------------------------------
 
 def _check_schedules(app) -> None:
-    """Called every minute. Fires enabled schedules whose day+time match now."""
+    """Called every minute. Fires enabled schedules whose time and date criteria match now."""
     with app.app_context():
+        from app import db
         from app.models import ScheduledRecall
 
         now_local = datetime.now()
         current_dow = str(now_local.weekday())   # "0"=Mon … "6"=Sun
         current_hhmm = now_local.strftime("%H:%M")
+        today = now_local.date()
 
         schedules = ScheduledRecall.query.filter_by(enabled=True).all()
         for sched in schedules:
@@ -124,16 +126,36 @@ def _check_schedules(app) -> None:
                 if elapsed < 55:
                     continue
 
-            days = [d.strip() for d in sched.days_of_week.split(",")]
-            if current_dow in days and current_hhmm == sched.time_of_day:
+            if current_hhmm != sched.time_of_day:
+                continue
+
+            mode = sched.schedule_mode or "weekly"
+            should_fire = False
+
+            if mode == "once":
+                should_fire = bool(sched.run_date and sched.run_date == today)
+            elif mode == "weekly_until":
+                days = [d.strip() for d in (sched.days_of_week or "").split(",")]
+                in_days = current_dow in days
+                before_end = sched.end_date is None or today <= sched.end_date
+                should_fire = in_days and before_end
+            else:  # "weekly"
+                days = [d.strip() for d in (sched.days_of_week or "").split(",")]
+                should_fire = current_dow in days
+
+            if should_fire:
                 logger.info(
-                    "Leash scheduler: firing %s schedule %r (id=%d)",
-                    sched.schedule_type, sched.name, sched.id,
+                    "Leash scheduler: firing %s schedule %r (id=%d, mode=%s)",
+                    sched.schedule_type, sched.name, sched.id, mode,
                 )
                 if sched.schedule_type == "camera":
                     _do_camera_recall(app, sched.id)
                 else:
                     _do_recall(app, sched.id)
+                # Auto-disable one-time schedules after they fire
+                if mode == "once":
+                    sched.enabled = False
+                    db.session.commit()
 
 
 # ---------------------------------------------------------------------------

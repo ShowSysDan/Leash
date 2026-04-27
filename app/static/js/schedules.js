@@ -21,6 +21,18 @@
   updateCountdowns();
   setInterval(updateCountdowns, 30000);
 
+  // ── mode toggle ────────────────────────────────────────────────────────────
+
+  function applyModeUI(mode) {
+    document.getElementById('days-section').style.display    = (mode === 'once')  ? 'none' : '';
+    document.getElementById('run-date-section').style.display = (mode === 'once')  ? '' : 'none';
+    document.getElementById('end-date-section').style.display = (mode === 'weekly_until') ? '' : 'none';
+  }
+
+  document.getElementById('sched-mode')?.addEventListener('change', function () {
+    applyModeUI(this.value);
+  });
+
   // ── persist options toggle ─────────────────────────────────────────────────
 
   document.getElementById('sched-persistent')?.addEventListener('change', function () {
@@ -154,7 +166,10 @@
     editBtn.setAttribute('data-sched-id', s.id);
     editBtn.setAttribute('data-name', s.name);
     editBtn.setAttribute('data-snapshot-id', s.snapshot_id || '');
-    editBtn.setAttribute('data-days', s.days_of_week);
+    editBtn.setAttribute('data-mode', s.schedule_mode || 'weekly');
+    editBtn.setAttribute('data-days', s.days_of_week || '');
+    editBtn.setAttribute('data-run-date', s.run_date || '');
+    editBtn.setAttribute('data-end-date', s.end_date || '');
     editBtn.setAttribute('data-time', s.time_of_day);
     editBtn.setAttribute('data-enabled', s.enabled);
     editBtn.setAttribute('data-persistent', s.persistent);
@@ -194,12 +209,16 @@
     document.getElementById('schedule-modal-title').textContent = 'Add Schedule';
     document.getElementById('sched-name').value = '';
     document.getElementById('sched-snapshot').value = '';
+    document.getElementById('sched-mode').value = 'weekly';
     document.getElementById('sched-time').value = '';
+    document.getElementById('sched-run-date').value = '';
+    document.getElementById('sched-end-date').value = '';
     document.getElementById('sched-enabled').checked = true;
     document.getElementById('sched-persistent').checked = false;
     document.getElementById('sched-persist-minutes').value = '60';
     document.getElementById('persist-options').style.display = 'none';
     document.querySelectorAll('.day-check').forEach(cb => { cb.checked = false; });
+    applyModeUI('weekly');
   }
 
   function openEditModal(btn) {
@@ -211,12 +230,18 @@
     document.getElementById('sched-time').value = btn.dataset.time;
     document.getElementById('sched-enabled').checked = btn.dataset.enabled === 'true';
 
+    const mode = btn.dataset.mode || 'weekly';
+    document.getElementById('sched-mode').value = mode;
+    document.getElementById('sched-run-date').value = btn.dataset.runDate || '';
+    document.getElementById('sched-end-date').value = btn.dataset.endDate || '';
+    applyModeUI(mode);
+
     const persistent = btn.dataset.persistent === 'true';
     document.getElementById('sched-persistent').checked = persistent;
     document.getElementById('sched-persist-minutes').value = btn.dataset.persistMinutes || '60';
     document.getElementById('persist-options').style.display = persistent ? '' : 'none';
 
-    const days = btn.dataset.days.split(',');
+    const days = (btn.dataset.days || '').split(',');
     document.querySelectorAll('.day-check').forEach(cb => {
       cb.checked = days.includes(cb.value);
     });
@@ -226,29 +251,40 @@
   // ── save (create or update) ────────────────────────────────────────────────
 
   document.getElementById('btn-save-schedule')?.addEventListener('click', async () => {
-    const editId        = document.getElementById('sched-edit-id').value;
-    const name          = document.getElementById('sched-name').value.trim();
-    const snapId        = document.getElementById('sched-snapshot').value;
-    const time          = document.getElementById('sched-time').value;
-    const enabled       = document.getElementById('sched-enabled').checked;
-    const persistent    = document.getElementById('sched-persistent').checked;
-    const persistMins   = parseInt(document.getElementById('sched-persist-minutes').value) || 60;
-    const days          = [...document.querySelectorAll('.day-check:checked')].map(cb => cb.value);
+    const editId      = document.getElementById('sched-edit-id').value;
+    const name        = document.getElementById('sched-name').value.trim();
+    const snapId      = document.getElementById('sched-snapshot').value;
+    const mode        = document.getElementById('sched-mode').value;
+    const time        = document.getElementById('sched-time').value;
+    const runDate     = document.getElementById('sched-run-date').value;
+    const endDate     = document.getElementById('sched-end-date').value;
+    const enabled     = document.getElementById('sched-enabled').checked;
+    const persistent  = document.getElementById('sched-persistent').checked;
+    const persistMins = parseInt(document.getElementById('sched-persist-minutes').value) || 60;
+    const days        = [...document.querySelectorAll('.day-check:checked')].map(cb => cb.value);
 
-    if (!name)        { window.Leash.toast('Name is required', 'warning'); return; }
-    if (!snapId)      { window.Leash.toast('Select a snapshot', 'warning'); return; }
-    if (!time)        { window.Leash.toast('Set a time', 'warning'); return; }
-    if (!days.length) { window.Leash.toast('Select at least one day', 'warning'); return; }
+    if (!name)                              { window.Leash.toast('Name is required', 'warning'); return; }
+    if (!snapId)                            { window.Leash.toast('Select a snapshot', 'warning'); return; }
+    if (!time)                              { window.Leash.toast('Set a time', 'warning'); return; }
+    if (mode === 'once' && !runDate)        { window.Leash.toast('Date is required', 'warning'); return; }
+    if (mode !== 'once' && !days.length)   { window.Leash.toast('Select at least one day', 'warning'); return; }
 
     const body = {
       name,
       snapshot_id: parseInt(snapId),
-      days_of_week: days.join(','),
+      schedule_mode: mode,
       time_of_day: time,
       enabled,
       persistent,
       persist_minutes: persistMins,
     };
+
+    if (mode === 'once') {
+      body.run_date = runDate;
+    } else {
+      body.days_of_week = days.join(',');
+      if (mode === 'weekly_until' && endDate) body.end_date = endDate;
+    }
 
     const url    = editId ? `/api/schedules/${editId}` : '/api/schedules';
     const method = editId ? 'PUT' : 'POST';

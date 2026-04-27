@@ -9,7 +9,7 @@ DELETE /api/schedules/<id>             delete
 PATCH  /api/schedules/<id>/toggle      flip enabled flag
 DELETE /api/schedules/<id>/enforcement end an active enforcement window early
 """
-from datetime import datetime
+from datetime import datetime, date as date_type
 
 from flask import Blueprint, jsonify, request
 
@@ -20,20 +20,26 @@ from app.routes._helpers import err as _err, valid_time_of_day, valid_name
 schedules_api_bp = Blueprint("schedules_api", __name__)
 
 _VALID_DAYS = {"0", "1", "2", "3", "4", "5", "6"}
+_VALID_MODES = {"weekly", "once", "weekly_until"}
 
 
-def _validate_days_time(body: dict):
-    """Shared day/time validation. Returns (days_str, time_str, error) or (…, None)."""
+def _parse_date(val) -> tuple[date_type | None, str | None]:
+    """Parse an ISO date string (YYYY-MM-DD). Returns (date, None) or (None, error)."""
+    if not val:
+        return None, "date is required"
+    try:
+        return datetime.strptime(str(val).strip(), "%Y-%m-%d").date(), None
+    except ValueError:
+        return None, f"invalid date '{val}' — expected YYYY-MM-DD"
+
+
+def _validate_days(body: dict) -> tuple[str | None, str | None]:
     days_raw = body.get("days_of_week", "")
     days_list = [str(d) for d in days_raw] if isinstance(days_raw, list) else \
                 [d.strip() for d in str(days_raw).split(",") if d.strip()]
     if not days_list or not all(d in _VALID_DAYS for d in days_list):
-        return None, None, "days_of_week must be day numbers 0 (Mon) – 6 (Sun)"
-    days_str = ",".join(sorted(set(days_list), key=int))
-    time_str = (body.get("time_of_day") or "").strip()
-    if not valid_time_of_day(time_str):
-        return None, None, "time_of_day must be HH:MM (24-hour, local server time)"
-    return days_str, time_str, None
+        return None, "days_of_week must be day numbers 0 (Mon) – 6 (Sun)"
+    return ",".join(sorted(set(days_list), key=int)), None
 
 
 def _validate_body(body: dict):
@@ -42,13 +48,44 @@ def _validate_body(body: dict):
     if not ok:
         return None, "name is required (max 100 characters)"
 
-    days_str, time_str, days_err = _validate_days_time(body)
-    if days_err:
-        return None, days_err
+    time_str = (body.get("time_of_day") or "").strip()
+    if not valid_time_of_day(time_str):
+        return None, "time_of_day must be HH:MM (24-hour, local server time)"
+
+    mode = body.get("schedule_mode", "weekly")
+    if mode not in _VALID_MODES:
+        return None, f"schedule_mode must be one of: {', '.join(_VALID_MODES)}"
+
+    days_str = ""
+    run_date = end_date = None
+
+    if mode == "once":
+        run_date, err = _parse_date(body.get("run_date"))
+        if err:
+            return None, f"run_date: {err}"
+    else:
+        days_str, err = _validate_days(body)
+        if err:
+            return None, err
+        if mode == "weekly_until":
+            end_date, err = _parse_date(body.get("end_date"))
+            if err:
+                return None, f"end_date: {err}"
 
     stype = body.get("schedule_type", "ndi")
     if stype not in ("ndi", "camera"):
         return None, "schedule_type must be 'ndi' or 'camera'"
+
+    base = {
+        "name": name,
+        "schedule_type": stype,
+        "schedule_mode": mode,
+        "days_of_week": days_str,
+        "time_of_day": time_str,
+        "run_date": run_date,
+        "end_date": end_date,
+        "enabled": bool(body.get("enabled", True)),
+    }
 
     if stype == "camera":
         cam_id = body.get("camera_id")
@@ -59,15 +96,7 @@ def _validate_body(body: dict):
             return None, f"Camera {cam_id} not found"
         if preset_num is None or not (0 <= int(preset_num) <= 99):
             return None, "preset_number must be 0–99"
-        return {
-            "name": name,
-            "schedule_type": "camera",
-            "camera_id": int(cam_id),
-            "preset_number": int(preset_num),
-            "days_of_week": days_str,
-            "time_of_day": time_str,
-            "enabled": bool(body.get("enabled", True)),
-        }, None
+        return {**base, "camera_id": int(cam_id), "preset_number": int(preset_num)}, None
     else:
         snap_id = body.get("snapshot_id")
         if snap_id is None:
@@ -78,12 +107,8 @@ def _validate_body(body: dict):
         if persist_minutes < 1 or persist_minutes > 1440:
             return None, "persist_minutes must be between 1 and 1440"
         return {
-            "name": name,
-            "schedule_type": "ndi",
+            **base,
             "snapshot_id": int(snap_id),
-            "days_of_week": days_str,
-            "time_of_day": time_str,
-            "enabled": bool(body.get("enabled", True)),
             "persistent": bool(body.get("persistent", False)),
             "persist_minutes": persist_minutes,
         }, None

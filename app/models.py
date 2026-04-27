@@ -337,10 +337,19 @@ class ScheduledRecall(db.Model):
     camera_id = db.Column(db.Integer, db.ForeignKey("ptz_cameras.id", ondelete="SET NULL"), nullable=True)
     preset_number = db.Column(db.Integer, nullable=True)
 
+    # "weekly" = existing; "once" = single date; "weekly_until" = weekly with end date
+    schedule_mode = db.Column(db.String(20), nullable=False, default="weekly")
+
     # Comma-separated weekday numbers: 0=Mon … 6=Sun  (e.g. "0,1,2,3,4" = Mon–Fri)
-    days_of_week = db.Column(db.String(20), nullable=False)
+    # Empty string for "once" mode.
+    days_of_week = db.Column(db.String(20), nullable=False, default="")
     # "HH:MM" in local server time (24-hour)
     time_of_day = db.Column(db.String(5), nullable=False)
+
+    # One-time date (schedule_mode="once")
+    run_date = db.Column(db.Date, nullable=True)
+    # Recurring end date (schedule_mode="weekly_until")
+    end_date = db.Column(db.Date, nullable=True)
 
     enabled = db.Column(db.Boolean, default=True, nullable=False)
     last_run = db.Column(db.DateTime)
@@ -360,7 +369,13 @@ class ScheduledRecall(db.Model):
     DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
     def day_labels(self) -> list[str]:
-        return [self.DAY_NAMES[int(d)] for d in self.days_of_week.split(",") if d.strip().isdigit()]
+        mode = self.schedule_mode or "weekly"
+        if mode == "once":
+            return [f"Once: {self.run_date.strftime('%b %d %Y')}"] if self.run_date else ["(no date)"]
+        labels = [self.DAY_NAMES[int(d)] for d in (self.days_of_week or "").split(",") if d.strip().isdigit()]
+        if mode == "weekly_until" and self.end_date:
+            labels.append(f"until {self.end_date.strftime('%b %d %Y')}")
+        return labels
 
     def is_enforcing(self) -> bool:
         return bool(self.enforcing_until and self.enforcing_until > datetime.utcnow())
@@ -376,9 +391,12 @@ class ScheduledRecall(db.Model):
             "id": self.id,
             "name": self.name,
             "schedule_type": self.schedule_type,
-            "days_of_week": self.days_of_week,
+            "schedule_mode": self.schedule_mode or "weekly",
+            "days_of_week": self.days_of_week or "",
             "day_labels": self.day_labels(),
             "time_of_day": self.time_of_day,
+            "run_date": self.run_date.isoformat() if self.run_date else None,
+            "end_date": self.end_date.isoformat() if self.end_date else None,
             "enabled": self.enabled,
             "last_run": self.last_run.isoformat() if self.last_run else None,
             "last_result": self.last_result,
