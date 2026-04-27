@@ -103,7 +103,7 @@
               <div class="col-auto">
                 <label class="form-label small mb-1">Preset #</label>
                 <input type="number" class="form-control form-control-sm" id="save-preset-num"
-                       min="0" max="99" value="0" style="width:5rem">
+                       min="1" max="99" value="1" style="width:5rem">
               </div>
               <div class="col">
                 <label class="form-label small mb-1">Label</label>
@@ -118,9 +118,9 @@
           </div>
         </div>
 
-        <!-- Preset list: slots 0–9 always visible; labeled slots show name + delete -->
+        <!-- Preset list: slots 1–10 always visible; labeled slots show name + delete -->
         <div id="preset-list">
-          {% for i in range(10) %}
+          {% for i in range(1, 11) %}
           <div class="d-flex align-items-center gap-2 mb-2 preset-row" data-preset-num="{{ i }}">
             <span class="badge bg-secondary" style="min-width:2.5rem">{{ i }}</span>
             <span class="flex-grow-1 preset-name">{{ preset_map.get(i, '') }}</span>
@@ -139,41 +139,6 @@
     </div>
   </div>
 
-  <!-- Advanced Settings -->
-  <div class="col-12">
-    <div class="card">
-      <div class="card-header fw-semibold">
-        <a class="text-decoration-none text-light" data-bs-toggle="collapse" href="#advancedSettings">
-          <i class="bi bi-sliders me-2"></i>Advanced Picture Settings
-          <i class="bi bi-chevron-down ms-1 small"></i>
-        </a>
-      </div>
-      <div class="collapse" id="advancedSettings">
-        <div class="card-body">
-          <ul class="nav nav-tabs mb-3" id="settingsTabs">
-            {% for group in ['exposure','white_balance','picture','colour_matrix','detail','gamma'] %}
-            <li class="nav-item">
-              <button class="nav-link {% if loop.first %}active{% endif %} settings-tab"
-                      data-group="{{ group }}"
-                      data-bs-toggle="tab" data-bs-target="#tab-{{ group }}">
-                {{ group | replace('_',' ') | title }}
-              </button>
-            </li>
-            {% endfor %}
-          </ul>
-          <div class="tab-content">
-            {% for group in ['exposure','white_balance','picture','colour_matrix','detail','gamma'] %}
-            <div class="tab-pane {% if loop.first %}show active{% endif %}" id="tab-{{ group }}">
-              <div class="settings-loader text-muted small" data-group="{{ group }}" data-camera-id="{{ camera.id }}">
-                <span class="spinner-border spinner-border-sm me-1"></span>Loading…
-              </div>
-            </div>
-            {% endfor %}
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
 
 </div><!-- /row -->
 {% endblock %}

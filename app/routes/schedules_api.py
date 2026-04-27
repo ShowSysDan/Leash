@@ -94,8 +94,8 @@ def _validate_body(body: dict):
             return None, "camera_id is required for camera schedules"
         if not PTZCamera.query.get(int(cam_id)):
             return None, f"Camera {cam_id} not found"
-        if preset_num is None or not (0 <= int(preset_num) <= 99):
-            return None, "preset_number must be 0–99"
+        if preset_num is None or not (1 <= int(preset_num) <= 99):
+            return None, "preset_number must be 1–99"
         return {**base, "camera_id": int(cam_id), "preset_number": int(preset_num)}, None
     else:
         snap_id = body.get("snapshot_id")

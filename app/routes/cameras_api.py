@@ -19,10 +19,6 @@ Presets (numbers stored on device; labels stored in DB)
   DELETE /api/cameras/<id>/presets/<num>    remove a preset label
   POST   /api/cameras/<id>/presets/<num>/recall   recall preset on device
   POST   /api/cameras/<id>/presets/<num>/save     save current position as preset
-
-Picture settings (pass-through to BirdDog device)
-  GET    /api/cameras/<id>/settings/<group>
-  POST   /api/cameras/<id>/settings/<group>
 """
 import logging
 from datetime import datetime
@@ -37,18 +33,6 @@ from app.services.birddog_client import client_from_camera, ptz_client_from_came
 logger = logging.getLogger(__name__)
 
 cameras_api_bp = Blueprint("cameras_api", __name__)
-
-# Settings groups accessible on cameras (subset of full birddog_client menu)
-CAMERA_SETTINGS_GROUPS = {
-    "exposure":     ("get_exposure",      "set_exposure"),
-    "white_balance":("get_white_balance", "set_white_balance"),
-    "picture":      ("get_picture",       "set_picture"),
-    "colour_matrix":("get_colour_matrix", "set_colour_matrix"),
-    "detail":       ("get_detail",        "set_detail"),
-    "gamma":        ("get_gamma",         "set_gamma"),
-    "advanced":     ("get_advanced",      "set_advanced"),
-    "ptz_setup":    ("get_ptz_setup",     "set_ptz_setup"),
-}
 
 
 # ---------------------------------------------------------------------------
@@ -287,30 +271,3 @@ def save_preset(camera_id: int, preset_num: int):
             db.session.commit()
 
     return jsonify({"status": code, "response": data, "preset_number": preset_num})
-
-
-# ---------------------------------------------------------------------------
-# Picture settings (pass-through)
-# ---------------------------------------------------------------------------
-
-@cameras_api_bp.route("/cameras/<int:camera_id>/settings/<group>", methods=["GET"])
-def get_camera_settings(camera_id: int, group: str):
-    if group not in CAMERA_SETTINGS_GROUPS:
-        return _err(f"Unknown settings group '{group}'", 404)
-    cam = PTZCamera.query.get_or_404(camera_id)
-    getter, _ = CAMERA_SETTINGS_GROUPS[group]
-    code, data = run_async(getattr(client_from_camera(cam, current_app.config), getter)())
-    return jsonify({"status": code, "group": group, "data": data})
-
-
-@cameras_api_bp.route("/cameras/<int:camera_id>/settings/<group>", methods=["POST"])
-def set_camera_settings(camera_id: int, group: str):
-    if group not in CAMERA_SETTINGS_GROUPS:
-        return _err(f"Unknown settings group '{group}'", 404)
-    _, setter = CAMERA_SETTINGS_GROUPS[group]
-    if not setter:
-        return _err(f"Settings group '{group}' is read-only", 405)
-    cam = PTZCamera.query.get_or_404(camera_id)
-    body = request.get_json(silent=True) or {}
-    code, data = run_async(getattr(client_from_camera(cam, current_app.config), setter)(body))
-    return jsonify({"status": code, "group": group, "data": data})

@@ -3,7 +3,6 @@
  *
  * PTZ / focus buttons use press-and-hold (pointerdown → move, pointerup/leave → stop).
  * BirdDog cameras keep moving until an explicit STOP is sent.
- * Settings tabs are loaded lazily on first activation.
  */
 document.addEventListener('DOMContentLoaded', () => {
   const cameraId = window.LEASH?.cameraId;
@@ -149,7 +148,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-save-preset-confirm')?.addEventListener('click', async () => {
     const num  = parseInt(document.getElementById('save-preset-num').value, 10);
     const name = document.getElementById('save-preset-name').value.trim();
-    if (isNaN(num) || num < 0 || num > 99) { toast('Preset number must be 0–99', 'warning'); return; }
+    if (isNaN(num) || num < 1 || num > 99) { toast('Preset number must be 1–99', 'warning'); return; }
     if (!name) { toast('Label is required', 'warning'); return; }
 
     const d = await api(`/presets/${num}/save`, { name });
@@ -217,92 +216,4 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // ── Settings tabs — lazy load ──────────────────────────────────────────────
-  const loadedGroups = new Set();
-
-  async function loadSettingsGroup(group) {
-    if (loadedGroups.has(group)) return;
-    loadedGroups.add(group);
-
-    const loader = document.querySelector(`.settings-loader[data-group="${group}"]`);
-    if (!loader) return;
-
-    try {
-      const resp = await fetch(`/api/cameras/${cameraId}/settings/${group}`);
-      const d = await resp.json();
-      const container = loader.parentElement;
-      container.innerHTML = '';
-
-      if (d.status !== 200 || !d.data || typeof d.data !== 'object') {
-        const msg = document.createElement('p');
-        msg.className = 'text-muted small';
-        msg.textContent = d.status !== 200 ? `Device returned HTTP ${d.status}` : 'No settings data returned.';
-        container.appendChild(msg);
-        return;
-      }
-
-      const form = document.createElement('form');
-      form.className = 'row g-2 settings-form';
-      form.dataset.group = group;
-
-      Object.entries(d.data).forEach(([key, val]) => {
-        const col = document.createElement('div');
-        col.className = 'col-md-4 col-sm-6';
-
-        const label = document.createElement('label');
-        label.className = 'form-label small mb-1';
-        label.textContent = key;
-
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.className = 'form-control form-control-sm settings-field';
-        input.dataset.key = key;
-        input.value = val ?? '';
-
-        col.appendChild(label);
-        col.appendChild(input);
-        form.appendChild(col);
-      });
-
-      const saveRow = document.createElement('div');
-      saveRow.className = 'col-12 mt-2';
-      const saveBtn = document.createElement('button');
-      saveBtn.type = 'button';
-      saveBtn.className = 'btn btn-sm btn-primary btn-save-settings';
-      saveBtn.dataset.group = group;
-      saveBtn.textContent = 'Apply';
-      saveRow.appendChild(saveBtn);
-      form.appendChild(saveRow);
-
-      container.appendChild(form);
-
-      saveBtn.addEventListener('click', async () => {
-        const payload = {};
-        form.querySelectorAll('.settings-field').forEach(f => { payload[f.dataset.key] = f.value; });
-        const r = await fetch(`/api/cameras/${cameraId}/settings/${group}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const rd = await r.json();
-        toast(rd.status === 200 ? `${group.replace('_',' ')} saved` : `Save failed (${rd.status})`,
-              rd.status === 200 ? 'success' : 'danger');
-      });
-    } catch (err) {
-      const msg = document.createElement('p');
-      msg.className = 'text-danger small';
-      msg.textContent = `Error loading settings: ${err}`;
-      loader.replaceWith(msg);
-    }
-  }
-
-  // Load first tab immediately when accordion opens
-  document.getElementById('advancedSettings')?.addEventListener('show.bs.collapse', () => {
-    const activeTab = document.querySelector('.settings-tab.active');
-    if (activeTab) loadSettingsGroup(activeTab.dataset.group);
-  });
-
-  document.querySelectorAll('.settings-tab').forEach(tab => {
-    tab.addEventListener('shown.bs.tab', () => loadSettingsGroup(tab.dataset.group));
-  });
 });
