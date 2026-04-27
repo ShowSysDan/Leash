@@ -32,7 +32,7 @@ from flask import Blueprint, current_app, jsonify, request
 from app import db
 from app.models import CameraPreset, PTZCamera
 from app.routes._helpers import MAX_LABEL, err as _err, valid_octet
-from app.services.birddog_client import client_from_camera, run_async
+from app.services.birddog_client import client_from_camera, ptz_client_from_camera, run_async
 
 logger = logging.getLogger(__name__)
 
@@ -131,28 +131,25 @@ def probe_camera(camera_id: int):
     cam = PTZCamera.query.get_or_404(camera_id)
     client = client_from_camera(cam, current_app.config)
 
-    probe_paths = [
-        "/birddogptzcontrol",
-        "/ptzControl",
-        "/PTZControl",
-        "/birddogfocuscontrol",
-        "/focusControl",
-        "/birddogRecallPreset",
-        "/about",
-    ]
+    ptz_client = ptz_client_from_camera(cam, current_app.config)
+    ptz_port   = current_app.config.get("CAMERA_PTZ_PORT", 6791)
 
     async def _probe_all():
-        results = {}
-        for path in probe_paths:
-            code, _ = await client._get(path)
-            results[path] = code
-        return results
+        about_code, about_data = await client._get("/about")
+        port8080 = {"GET /about": about_code}
+        port6791 = {}
+        for path in ["/birddogptz", "/birddogfocus", "/birddogRecallPreset",
+                     "/birddogSavePreset", "/birddogptzcontrol"]:
+            code, _ = await ptz_client._post(path, {})
+            port6791[f"POST {path}"] = code
+        return about_data if about_code == 200 else None, port8080, port6791
 
-    results = run_async(_probe_all())
+    about_data, p8080, p6791 = run_async(_probe_all())
     return jsonify({
         "camera_ip": cam.ip_address,
-        "port": current_app.config.get("NDI_DEVICE_PORT", 8080),
-        "probes": results,
+        "port_8080": p8080,
+        f"port_{ptz_port}": p6791,
+        "about": about_data,
     })
 
 
@@ -181,14 +178,14 @@ def ptz_command(camera_id: int):
     if pan not in valid_pan or tilt not in valid_tilt or zoom not in valid_zoom:
         return _err("Invalid pan/tilt/zoom value")
 
-    client = client_from_camera(cam, current_app.config)
-    current_app.logger.info(
-        "PTZ %s: pan=%s tilt=%s zoom=%s speed=%d → %s:%s",
-        cam.display_name, pan, tilt, zoom, speed,
-        cam.ip_address, current_app.config.get("NDI_DEVICE_PORT", 8080),
+    client = ptz_client_from_camera(cam, current_app.config)
+    current_app.logger.warning(
+        "PTZ %s: pan=%s tilt=%s zoom=%s → %s:%d",
+        cam.display_name, pan, tilt, zoom,
+        cam.ip_address, current_app.config.get("CAMERA_PTZ_PORT", 6791),
     )
     code, data = run_async(client.ptz_move(pan=pan, tilt=tilt, zoom=zoom, speed=speed))
-    current_app.logger.info("PTZ %s response: HTTP %d %s", cam.display_name, code, data)
+    current_app.logger.warning("PTZ %s response: HTTP %d %s", cam.display_name, code, data)
     return jsonify({"status": code, "response": data})
 
 
@@ -200,7 +197,7 @@ def focus_command(camera_id: int):
     action = str(body.get("action", "STOP")).upper()
     if action not in {"NEAR", "FAR", "STOP", "AUTO"}:
         return _err("action must be NEAR, FAR, STOP, or AUTO")
-    client = client_from_camera(cam, current_app.config)
+    client = ptz_client_from_camera(cam, current_app.config)
     code, data = run_async(client.focus_control(action))
     return jsonify({"status": code, "response": data})
 
@@ -256,7 +253,7 @@ def recall_preset(camera_id: int, preset_num: int):
     if not (0 <= preset_num <= 99):
         return _err("preset_number must be 0–99")
     cam = PTZCamera.query.get_or_404(camera_id)
-    client = client_from_camera(cam, current_app.config)
+    client = ptz_client_from_camera(cam, current_app.config)
     code, data = run_async(client.recall_preset(preset_num))
     label = next((p.name for p in cam.presets if p.preset_number == preset_num), None)
     logger.info("Camera %s: recalled preset %d (%s) → HTTP %d",
@@ -272,7 +269,7 @@ def save_preset(camera_id: int, preset_num: int):
     cam = PTZCamera.query.get_or_404(camera_id)
     body = request.get_json(silent=True) or {}
 
-    client = client_from_camera(cam, current_app.config)
+    client = ptz_client_from_camera(cam, current_app.config)
     code, data = run_async(client.save_preset(preset_num))
 
     if code == 200 and body.get("name"):

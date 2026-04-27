@@ -317,24 +317,34 @@ class BirdDogClient:
         zoom: str = "STOP",
         speed: int = 5,
     ) -> tuple[int, Any]:
-        """Send a PTZ velocity command.
-        Pan:  LEFT | RIGHT | STOP
-        Tilt: UP   | DOWN  | STOP
-        Zoom: TELE | WIDE  | STOP
-        Speed: 1–24
+        """Send a PTZ velocity command to a BirdDog camera.
+
+        BirdDog cameras (port 6791) combine pan+tilt into a single
+        direction string on /birddogptz.  Zoom is a separate key.
+        Speed is not part of this protocol.
         """
-        s = str(max(1, min(24, speed)))
-        return await self._post("/birddogptzcontrol", {
-            "Pan": pan, "Tilt": tilt, "Zoom": zoom,
-            "PanSpeed": s, "TiltSpeed": s, "ZoomSpeed": s,
-        })
+        _pantilt_map = {
+            ("STOP",  "STOP"):  "stop",
+            ("LEFT",  "STOP"):  "left",
+            ("RIGHT", "STOP"):  "right",
+            ("STOP",  "UP"):    "up",
+            ("STOP",  "DOWN"):  "down",
+            ("LEFT",  "UP"):    "leftup",
+            ("RIGHT", "UP"):    "rightup",
+            ("LEFT",  "DOWN"):  "leftdown",
+            ("RIGHT", "DOWN"):  "rightdown",
+        }
+        payload: dict = {"PanTilt": _pantilt_map.get((pan, tilt), "stop")}
+        if zoom != "STOP":
+            payload["Zoom"] = zoom.lower()   # "tele" or "wide"
+        return await self._post("/birddogptz", payload)
 
     async def ptz_stop(self) -> tuple[int, Any]:
         return await self.ptz_move("STOP", "STOP", "STOP")
 
     async def focus_control(self, action: str = "STOP") -> tuple[int, Any]:
         """action: NEAR | FAR | STOP | AUTO"""
-        return await self._post("/birddogfocuscontrol", {"Focus": action.upper()})
+        return await self._post("/birddogfocus", {"Focus": action.lower()})
 
     async def recall_preset(self, preset_number: int) -> tuple[int, Any]:
         return await self._post("/birddogRecallPreset", {"PresetNum": str(preset_number)})
@@ -415,6 +425,21 @@ def client_from_ip(ip: str, app_config) -> "BirdDogClient":
         port=app_config["NDI_DEVICE_PORT"],
         password=app_config["NDI_DEVICE_PASSWORD"],
         timeout=app_config["HTTP_TIMEOUT"],
+    )
+
+
+def ptz_client_from_camera(camera, app_config) -> "BirdDogClient":
+    """Build a BirdDogClient for PTZ/focus/preset control on a PTZ camera.
+
+    BirdDog cameras expose PTZ control on port 6791 (separate from the
+    NDI device REST API on port 8080).  CAMERA_PTZ_PORT overrides this.
+    """
+    ptz_port = app_config.get("CAMERA_PTZ_PORT", 6791)
+    return BirdDogClient(
+        ip=camera.ip_address,
+        port=ptz_port,
+        password=app_config.get("NDI_DEVICE_PASSWORD", "birddog"),
+        timeout=app_config.get("HTTP_TIMEOUT", 5),
     )
 
 
