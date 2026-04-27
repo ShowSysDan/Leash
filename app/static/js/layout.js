@@ -3,24 +3,37 @@
  *
  * Positions are stored as percentage (0–100) of canvas width/height so the layout
  * scales correctly on any screen size.
+ *
+ * Edit mode features:
+ *   - Drag cards / labels to reposition
+ *   - Shift+click to build a multi-selection; drag any selected card to move all
+ *   - Snap toggle: rounds positions to the nearest 5% grid
+ *   - Delete buttons only visible in edit mode
  */
 document.addEventListener('DOMContentLoaded', () => {
   const layoutId  = window.LEASH?.layoutId;
   const sources   = window.LEASH?.sources || [];
-  let positions   = window.LEASH?.positions || [];  // array from server
+  let positions   = window.LEASH?.positions || [];
   let editMode    = false;
-  let dragging    = null;   // { el, offsetX, offsetY }
+  let snapEnabled = false;
+  const SNAP      = 5;   // % grid step
+
+  let dragging    = null;
+  // dragging = { el, offsetX, offsetY, receiverId?, labelId?,
+  //              primaryStartX, primaryStartY,
+  //              peers: [{el, startX, startY, receiverId?, labelId?}] }
+
+  let selected    = new Set();   // Set<Element> — current multi-selection
 
   let labels      = window.LEASH?.labels || [];
 
   const canvas    = document.getElementById('layout-canvas');
   const saveBtn   = document.getElementById('btn-save-layout');
+  const snapBtn   = document.getElementById('btn-snap-grid');
 
   if (!canvas || !layoutId) return;
 
-  // ── Populate a <select> with source options ─────────────────────────────
-  // Source names come from NDI devices (untrusted) — use Option() which
-  // assigns via text property, not innerHTML.
+  // ── Source dropdown ─────────────────────────────────────────────────────
   function fillSourceOptions(select, current) {
     select.appendChild(new Option('— source —', ''));
     sources.forEach(name => {
@@ -30,14 +43,65 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // ── Render a single card ────────────────────────────────────────────────
-  // Build with createElement so device hostnames/labels cannot inject HTML.
+  // ── Selection helpers ────────────────────────────────────────────────────
+  function toggleSelect(el) {
+    if (selected.has(el)) {
+      selected.delete(el);
+      el.classList.remove('lc-selected');
+    } else {
+      selected.add(el);
+      el.classList.add('lc-selected');
+    }
+  }
+
+  function clearSelection() {
+    selected.forEach(el => el.classList.remove('lc-selected'));
+    selected.clear();
+  }
+
+  // Clicking on bare canvas (not a card) clears the selection
+  canvas.addEventListener('mousedown', e => {
+    if (e.target === canvas || e.target.classList.contains('layout-title')) {
+      clearSelection();
+    }
+  });
+
+  // ── Drag helpers ─────────────────────────────────────────────────────────
+  function startDrag(e, el, receiverId, labelId) {
+    const primaryStartX = parseFloat(el.style.left) || 0;
+    const primaryStartY = parseFloat(el.style.top)  || 0;
+
+    const peers = Array.from(selected)
+      .filter(peerEl => peerEl !== el)
+      .map(peerEl => ({
+        el:         peerEl,
+        startX:     parseFloat(peerEl.style.left) || 0,
+        startY:     parseFloat(peerEl.style.top)  || 0,
+        receiverId: peerEl.dataset.receiverId ? parseInt(peerEl.dataset.receiverId) : undefined,
+        labelId:    peerEl.dataset.labelId    ? parseInt(peerEl.dataset.labelId)    : undefined,
+      }));
+
+    dragging = {
+      el,
+      offsetX:       e.clientX - el.getBoundingClientRect().left,
+      offsetY:       e.clientY - el.getBoundingClientRect().top,
+      primaryStartX,
+      primaryStartY,
+      receiverId,
+      labelId,
+      peers,
+    };
+    el.classList.add('dragging');
+    e.preventDefault();
+  }
+
+  // ── Make receiver card ────────────────────────────────────────────────────
   function makeCard(pos) {
     const r   = pos.receiver;
     const div = document.createElement('div');
     div.className = 'lc-card';
-    div.dataset.receiverId  = pos.receiver_id;
-    div.dataset.positionId  = pos.id;
+    div.dataset.receiverId = pos.receiver_id;
+    div.dataset.positionId = pos.id;
     div.style.left = `${pos.x_pct}%`;
     div.style.top  = `${pos.y_pct}%`;
 
@@ -71,7 +135,7 @@ document.addEventListener('DOMContentLoaded', () => {
     div.appendChild(removeBtn);
 
     // Source change
-    div.querySelector('.lc-source-select').addEventListener('change', async e => {
+    select.addEventListener('change', async e => {
       const name = e.target.value;
       if (!name) return;
       const resp = await fetch(`/api/receivers/${pos.receiver_id}/source`, {
@@ -85,37 +149,31 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Remove from layout
-    div.querySelector('.lc-remove-btn').addEventListener('click', async () => {
+    removeBtn.addEventListener('click', async () => {
       if (!confirm('Remove from layout?')) return;
-      const resp = await fetch(`/api/layouts/${layoutId}/receivers/${pos.receiver_id}`, {
-        method: 'DELETE',
-      });
+      const resp = await fetch(`/api/layouts/${layoutId}/receivers/${pos.receiver_id}`,
+                               { method: 'DELETE' });
       if (resp.ok) {
         div.remove();
+        selected.delete(div);
         positions = positions.filter(p => p.receiver_id !== pos.receiver_id);
         window.Leash.toast('Removed from layout', 'info');
       }
     });
 
-    // Drag start
+    // Drag / shift-select
     div.addEventListener('mousedown', e => {
       if (!editMode) return;
       if (e.target.closest('select, button')) return;
-      const rect = canvas.getBoundingClientRect();
-      dragging = {
-        el: div,
-        offsetX: e.clientX - div.getBoundingClientRect().left,
-        offsetY: e.clientY - div.getBoundingClientRect().top,
-        receiverId: pos.receiver_id,
-      };
-      div.classList.add('dragging');
-      e.preventDefault();
+      if (e.shiftKey) { toggleSelect(div); e.preventDefault(); return; }
+      if (!selected.has(div)) clearSelection();
+      startDrag(e, div, pos.receiver_id, undefined);
     });
 
     return div;
   }
 
-  // ── Render a text label card ─────────────────────────────────────────────
+  // ── Make text label ───────────────────────────────────────────────────────
   function makeLabelCard(label) {
     const div = document.createElement('div');
     div.className = 'lc-label';
@@ -137,9 +195,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     removeBtn.addEventListener('click', async () => {
       if (!confirm('Remove this text label?')) return;
-      const resp = await fetch(`/api/layouts/${layoutId}/labels/${label.id}`, { method: 'DELETE' });
+      const resp = await fetch(`/api/layouts/${layoutId}/labels/${label.id}`,
+                               { method: 'DELETE' });
       if (resp.ok) {
         div.remove();
+        selected.delete(div);
         labels = labels.filter(l => l.id !== label.id);
         window.Leash.toast('Label removed', 'info');
       }
@@ -148,29 +208,25 @@ document.addEventListener('DOMContentLoaded', () => {
     div.addEventListener('mousedown', e => {
       if (!editMode) return;
       if (e.target.closest('button')) return;
-      dragging = {
-        el: div,
-        offsetX: e.clientX - div.getBoundingClientRect().left,
-        offsetY: e.clientY - div.getBoundingClientRect().top,
-        labelId: label.id,
-      };
-      div.classList.add('dragging');
-      e.preventDefault();
+      if (e.shiftKey) { toggleSelect(div); e.preventDefault(); return; }
+      if (!selected.has(div)) clearSelection();
+      startDrag(e, div, undefined, label.id);
     });
 
     return div;
   }
 
-  // ── Render all cards ────────────────────────────────────────────────────
+  // ── Render all cards ──────────────────────────────────────────────────────
   function renderAll() {
     canvas.querySelectorAll('.lc-card, .lc-label').forEach(c => c.remove());
     positions.forEach(pos => canvas.appendChild(makeCard(pos)));
     labels.forEach(label => canvas.appendChild(makeLabelCard(label)));
+    clearSelection();
   }
 
   renderAll();
 
-  // ── Mouse move / up for drag ────────────────────────────────────────────
+  // ── Mouse move / up for drag ──────────────────────────────────────────────
   document.addEventListener('mousemove', e => {
     if (!dragging) return;
     const rect = canvas.getBoundingClientRect();
@@ -178,8 +234,20 @@ document.addEventListener('DOMContentLoaded', () => {
     let y = (e.clientY - rect.top  - dragging.offsetY) / rect.height * 100;
     x = Math.max(0, Math.min(90, x));
     y = Math.max(0, Math.min(90, y));
+    if (snapEnabled) {
+      x = Math.round(x / SNAP) * SNAP;
+      y = Math.round(y / SNAP) * SNAP;
+    }
+
+    const dx = x - dragging.primaryStartX;
+    const dy = y - dragging.primaryStartY;
     dragging.el.style.left = `${x}%`;
     dragging.el.style.top  = `${y}%`;
+
+    dragging.peers.forEach(peer => {
+      peer.el.style.left = `${Math.max(0, Math.min(90, peer.startX + dx))}%`;
+      peer.el.style.top  = `${Math.max(0, Math.min(90, peer.startY + dy))}%`;
+    });
   });
 
   document.addEventListener('mouseup', () => {
@@ -187,6 +255,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const el = dragging.el;
     const x  = parseFloat(el.style.left);
     const y  = parseFloat(el.style.top);
+
+    // Update primary position in local data
     if (dragging.labelId !== undefined) {
       const label = labels.find(l => l.id === dragging.labelId);
       if (label) { label.x_pct = x; label.y_pct = y; }
@@ -194,17 +264,34 @@ document.addEventListener('DOMContentLoaded', () => {
       const pos = positions.find(p => p.receiver_id === dragging.receiverId);
       if (pos) { pos.x_pct = x; pos.y_pct = y; }
     }
+
+    // Update all peer positions in local data
+    dragging.peers.forEach(peer => {
+      const px = parseFloat(peer.el.style.left);
+      const py = parseFloat(peer.el.style.top);
+      if (peer.receiverId !== undefined) {
+        const pos = positions.find(p => p.receiver_id === peer.receiverId);
+        if (pos) { pos.x_pct = px; pos.y_pct = py; }
+      } else if (peer.labelId !== undefined) {
+        const label = labels.find(l => l.id === peer.labelId);
+        if (label) { label.x_pct = px; label.y_pct = py; }
+      }
+    });
+
     el.classList.remove('dragging');
     dragging = null;
   });
 
-  // ── Mode toggle ─────────────────────────────────────────────────────────
+  // ── Mode toggle ───────────────────────────────────────────────────────────
   document.getElementById('btn-view-mode')?.addEventListener('click', () => {
     editMode = false;
-    canvas.classList.remove('edit-mode');
+    snapEnabled = false;
+    canvas.classList.remove('edit-mode', 'snap-grid');
     document.getElementById('btn-view-mode').classList.add('active');
     document.getElementById('btn-edit-mode').classList.remove('active');
     if (saveBtn) saveBtn.style.display = 'none';
+    if (snapBtn) { snapBtn.style.display = 'none'; snapBtn.classList.remove('active', 'btn-info'); snapBtn.classList.add('btn-outline-secondary'); }
+    clearSelection();
   });
 
   document.getElementById('btn-edit-mode')?.addEventListener('click', () => {
@@ -213,9 +300,19 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-edit-mode').classList.add('active');
     document.getElementById('btn-view-mode').classList.remove('active');
     if (saveBtn) saveBtn.style.display = '';
+    if (snapBtn) snapBtn.style.display = '';
   });
 
-  // ── Save positions ───────────────────────────────────────────────────────
+  // ── Snap toggle ───────────────────────────────────────────────────────────
+  snapBtn?.addEventListener('click', () => {
+    snapEnabled = !snapEnabled;
+    snapBtn.classList.toggle('active',               snapEnabled);
+    snapBtn.classList.toggle('btn-info',             snapEnabled);
+    snapBtn.classList.toggle('btn-outline-secondary', !snapEnabled);
+    canvas.classList.toggle('snap-grid', snapEnabled);
+  });
+
+  // ── Save positions ────────────────────────────────────────────────────────
   saveBtn?.addEventListener('click', async () => {
     const payload = Array.from(canvas.querySelectorAll('.lc-card')).map(card => ({
       receiver_id: parseInt(card.dataset.receiverId),
@@ -223,7 +320,7 @@ document.addEventListener('DOMContentLoaded', () => {
       y_pct: parseFloat(card.style.top),
     }));
     const labelPayload = Array.from(canvas.querySelectorAll('.lc-label')).map(el => ({
-      id: parseInt(el.dataset.labelId),
+      id:    parseInt(el.dataset.labelId),
       x_pct: parseFloat(el.style.left),
       y_pct: parseFloat(el.style.top),
     }));
@@ -243,7 +340,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // ── Add receivers to layout ─────────────────────────────────────────────
+  // ── Add receivers to layout ───────────────────────────────────────────────
   document.getElementById('btn-add-to-layout')?.addEventListener('click', () => {
     new bootstrap.Modal(document.getElementById('addToLayoutModal')).show();
   });
@@ -264,7 +361,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => location.reload(), 500);
   });
 
-  // ── Add text label ───────────────────────────────────────────────────────
+  // ── Add text label ────────────────────────────────────────────────────────
   document.getElementById('btn-add-text')?.addEventListener('click', async () => {
     const text = prompt('Enter text:');
     if (!text?.trim()) return;
@@ -281,7 +378,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // ── Periodic poll — update hostnames and source selections ───────────────
+  // ── Periodic poll — update hostnames and source selections ────────────────
   async function pollAll() {
     const resp = await fetch('/api/receivers/bulk-reload');
     if (!resp.ok) return;
@@ -305,6 +402,5 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Poll every 30 seconds
   setInterval(pollAll, 30000);
 });
