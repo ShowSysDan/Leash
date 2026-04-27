@@ -16,7 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
   let positions   = window.LEASH?.positions || [];
   let editMode    = false;
   let snapEnabled = false;
-  const SNAP      = 5;   // % grid step
+  const SNAP      = 0.5; // % grid step
 
   let dragging    = null;
   // dragging = { el, offsetX, offsetY, receiverId?, labelId?,

@@ -182,7 +182,13 @@ def ptz_command(camera_id: int):
         return _err("Invalid pan/tilt/zoom value")
 
     client = client_from_camera(cam, current_app.config)
+    current_app.logger.info(
+        "PTZ %s: pan=%s tilt=%s zoom=%s speed=%d → %s:%s",
+        cam.display_name, pan, tilt, zoom, speed,
+        cam.ip_address, current_app.config.get("NDI_DEVICE_PORT", 8080),
+    )
     code, data = run_async(client.ptz_move(pan=pan, tilt=tilt, zoom=zoom, speed=speed))
+    current_app.logger.info("PTZ %s response: HTTP %d %s", cam.display_name, code, data)
     return jsonify({"status": code, "response": data})
 
 
