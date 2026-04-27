@@ -99,7 +99,10 @@
                     data-sched-id="{{ s.id }}"
                     data-name="{{ s.name }}"
                     data-snapshot-id="{{ s.snapshot_id or '' }}"
+                    data-mode="{{ s.schedule_mode or 'weekly' }}"
                     data-days="{{ s.days_of_week }}"
+                    data-run-date="{{ s.run_date.isoformat() if s.run_date else '' }}"
+                    data-end-date="{{ s.end_date.isoformat() if s.end_date else '' }}"
                     data-time="{{ s.time_of_day }}"
                     data-enabled="{{ 'true' if s.enabled else 'false' }}"
                     data-persistent="{{ 'true' if s.persistent else 'false' }}"
@@ -148,6 +151,15 @@
         </div>
 
         <div class="mb-3">
+          <label class="form-label">Schedule mode</label>
+          <select id="sched-mode" class="form-select">
+            <option value="weekly">Weekly (repeating)</option>
+            <option value="once">One-time date</option>
+            <option value="weekly_until">Weekly until date</option>
+          </select>
+        </div>
+
+        <div id="days-section" class="mb-3">
           <label class="form-label">Days of week</label>
           <div class="d-flex gap-2 flex-wrap" id="day-checkboxes">
             {% for n, label in [('0','Mon'),('1','Tue'),('2','Wed'),('3','Thu'),('4','Fri'),('5','Sat'),('6','Sun')] %}
@@ -162,6 +174,16 @@
             <button type="button" class="btn btn-xs btn-outline-secondary" id="days-all">Every day</button>
             <button type="button" class="btn btn-xs btn-outline-secondary" id="days-none">None</button>
           </div>
+        </div>
+
+        <div id="run-date-section" class="mb-3" style="display:none">
+          <label class="form-label">Date</label>
+          <input type="date" id="sched-run-date" class="form-control" style="max-width:200px">
+        </div>
+
+        <div id="end-date-section" class="mb-3" style="display:none">
+          <label class="form-label">Repeat until</label>
+          <input type="date" id="sched-end-date" class="form-control" style="max-width:200px">
         </div>
 
         <div class="mb-3">
