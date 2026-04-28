@@ -111,8 +111,13 @@ window.Leash = (() => {
     const offline = receivers.filter(r => r.status === 'offline').length;
     const tc = document.getElementById('total-count');
     const oc = document.getElementById('online-count');
+    const fc = document.getElementById('offline-count');
     if (tc) tc.textContent = total;
-    if (oc) oc.textContent = `${online} online${offline ? ` / ${offline} offline` : ''}`;
+    if (oc) oc.textContent = `${online} online`;
+    if (fc) {
+      fc.textContent = `/ ${offline} offline`;
+      fc.style.display = offline ? '' : 'none';
+    }
   }
 
   // ── Rebuild source dropdowns ────────────────────────────────────────────
