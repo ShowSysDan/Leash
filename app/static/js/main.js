@@ -72,17 +72,23 @@ window.Leash = (() => {
     const ipEl = card.querySelector('.ip-display');
     if (ipEl && data.ip_address) ipEl.textContent = data.ip_address;
 
-    // Firmware (tooltip on hostname)
+    // Firmware (tooltip on hostname). Wrapped so a tooltip hiccup never
+    // breaks the rest of the card update or the surrounding forEach loop.
     if (hn) {
-      const fw = data.firmware_version || '—';
-      const ip = data.ip_address || hn.dataset.ip || '';
-      hn.dataset.firmware = fw;
-      if (data.ip_address) hn.dataset.ip = data.ip_address;
-      const tipText = `${ip} · firmware ${fw}`;
-      hn.setAttribute('data-bs-original-title', tipText);
-      hn.setAttribute('title', tipText);
-      const tip = bootstrap.Tooltip.getInstance(hn);
-      if (tip) tip.setContent({ '.tooltip-inner': tipText });
+      try {
+        const fw = data.firmware_version || '—';
+        const ip = data.ip_address || hn.dataset.ip || '';
+        hn.dataset.firmware = fw;
+        if (data.ip_address) hn.dataset.ip = data.ip_address;
+        const tipText = `${ip} · firmware ${fw}`;
+        // Bootstrap stores the original title in data-bs-original-title; updating
+        // both keeps the value correct whether or not the tooltip has initialised.
+        hn.setAttribute('data-bs-original-title', tipText);
+        const tip = window.bootstrap?.Tooltip?.getInstance?.(hn);
+        if (tip && typeof tip.setContent === 'function') {
+          tip.setContent({ '.tooltip-inner': tipText });
+        }
+      } catch (_e) { /* tooltip update is cosmetic — never fail the poll */ }
     }
 
     // Source select
@@ -140,7 +146,8 @@ window.Leash = (() => {
     const resp = await fetch(`/api/receivers/${receiverId}/status`);
     if (!resp.ok) return null;
     const data = await resp.json();
-    updateReceiverCard(data);
+    try { updateReceiverCard(data); }
+    catch (e) { console.warn('updateReceiverCard failed:', e); }
     return data;
   }
 
@@ -154,7 +161,10 @@ window.Leash = (() => {
       const resp = await fetch('/api/receivers/bulk-reload');
       if (!resp.ok) { toast('Bulk reload failed', 'danger'); return; }
       const receivers = await resp.json();
-      receivers.forEach(updateReceiverCard);
+      receivers.forEach(r => {
+        try { updateReceiverCard(r); }
+        catch (e) { console.warn('updateReceiverCard failed for', r?.id, e); }
+      });
       updateSummary(receivers);
       const online = receivers.filter(r => r.status === 'online').length;
       toast(`Reload complete — ${online}/${receivers.length} online`, 'info');
