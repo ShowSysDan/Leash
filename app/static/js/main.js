@@ -68,9 +68,22 @@ window.Leash = (() => {
     const hn = card.querySelector('.hostname-display');
     if (hn) hn.textContent = data.hostname || data.label || `Player ${data.ip_last_octet}`;
 
-    // Firmware
-    const fw = card.querySelector('.firmware-display');
-    if (fw) fw.textContent = data.firmware_version || '—';
+    // IP display
+    const ipEl = card.querySelector('.ip-display');
+    if (ipEl && data.ip_address) ipEl.textContent = data.ip_address;
+
+    // Firmware (tooltip on hostname)
+    if (hn) {
+      const fw = data.firmware_version || '—';
+      const ip = data.ip_address || hn.dataset.ip || '';
+      hn.dataset.firmware = fw;
+      if (data.ip_address) hn.dataset.ip = data.ip_address;
+      const tipText = `${ip} · firmware ${fw}`;
+      hn.setAttribute('data-bs-original-title', tipText);
+      hn.setAttribute('title', tipText);
+      const tip = bootstrap.Tooltip.getInstance(hn);
+      if (tip) tip.setContent({ '.tooltip-inner': tipText });
+    }
 
     // Source select
     const sel = card.querySelector('.source-select');
@@ -354,8 +367,17 @@ window.Leash = (() => {
     }
   }
 
+  // ── Initialize Bootstrap tooltips ────────────────────────────────────────
+  function initTooltips(root = document) {
+    if (!window.bootstrap?.Tooltip) return;
+    root.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+      if (!bootstrap.Tooltip.getInstance(el)) new bootstrap.Tooltip(el);
+    });
+  }
+
   // ── Bind dashboard events ────────────────────────────────────────────────
   function bindDashboard() {
+    initTooltips();
     document.getElementById('btn-scan')?.addEventListener('click', scanNetwork);
     document.getElementById('btn-bulk-reload')?.addEventListener('click', bulkReload);
     document.getElementById('btn-discover')?.addEventListener('click', discoverSources);
