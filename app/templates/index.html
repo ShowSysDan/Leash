@@ -40,10 +40,14 @@
          data-receiver-id="{{ r.id }}">
       <div class="card-header d-flex align-items-center gap-2 py-2">
         <span class="status-dot status-{{ r.status }}"></span>
-        <span class="fw-semibold text-truncate flex-grow-1 hostname-display">
+        <span class="fw-semibold text-truncate flex-grow-1 hostname-display"
+              data-bs-toggle="tooltip" data-bs-placement="top"
+              title="{{ r.ip_address }} · firmware {{ r.firmware_version or '—' }}"
+              data-firmware="{{ r.firmware_version or '—' }}"
+              data-ip="{{ r.ip_address }}">
           {{ r.hostname or r.label or ('Player ' ~ r.ip_last_octet) }}
         </span>
-        <small class="text-muted ms-auto text-nowrap">{{ r.ip_address }}</small>
+        <small class="text-muted ms-auto text-nowrap ip-display">{{ r.ip_address }}</small>
         <a href="{{ url_for('main.receiver_detail', receiver_id=r.id) }}"
            class="btn btn-xs btn-outline-secondary ms-1" title="Settings">
           <i class="bi bi-gear"></i>
@@ -58,27 +62,21 @@
           {% endif %}
         </div>
         {% endif %}
-        <div class="mb-2">
-          <small class="text-muted">Firmware</small>
-          <div class="text-truncate small firmware-display">{{ r.firmware_version or '—' }}</div>
-        </div>
-        <div>
-          <small class="text-muted">NDI Source</small>
-          <select class="form-select form-select-sm source-select mt-1"
-                  data-receiver-id="{{ r.id }}"
-                  {% if r.status == 'offline' %}disabled{% endif %}>
-            <option value="">— select source —</option>
-            {% for s in sources %}
-            <option value="{{ s.name }}"
-                    {% if r.current_source == s.name %}selected{% endif %}>
-              {{ s.name }}
-            </option>
-            {% endfor %}
-            <option value="Reboot" {% if r.current_source == 'Reboot' %}selected{% endif %}>
-              ⚡ Reboot Device
-            </option>
-          </select>
-        </div>
+        <label class="form-label small text-uppercase text-muted source-label mb-1">NDI Source</label>
+        <select class="form-select form-select-sm source-select"
+                data-receiver-id="{{ r.id }}"
+                {% if r.status == 'offline' %}disabled{% endif %}>
+          <option value="">— select source —</option>
+          {% for s in sources %}
+          <option value="{{ s.name }}"
+                  {% if r.current_source == s.name %}selected{% endif %}>
+            {{ s.name }}
+          </option>
+          {% endfor %}
+          <option value="Reboot" {% if r.current_source == 'Reboot' %}selected{% endif %}>
+            ⚡ Reboot Device
+          </option>
+        </select>
       </div>
       <div class="card-footer py-1 d-flex gap-1 justify-content-end">
         {% if r.status == 'offline' %}
