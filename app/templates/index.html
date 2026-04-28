@@ -149,5 +149,30 @@ document.getElementById('show-offline').addEventListener('change', function() {
     col.style.display = this.checked ? '' : 'none';
   });
 });
+
+// Auto-refresh tiles every 15s so out-of-band source changes appear without
+// a manual reload. Pauses while the tab is hidden to avoid pointless polls,
+// and skips while a "Reload All" is already in flight.
+(function () {
+  const INTERVAL_MS = 15000;
+  let timer = null;
+
+  function start() {
+    if (timer) return;
+    timer = setInterval(() => {
+      if (document.hidden) return;
+      const btn = document.getElementById('btn-bulk-reload');
+      if (btn?.disabled) return;
+      window.Leash?.silentRefresh?.();
+    }, INTERVAL_MS);
+  }
+  function stop() { if (timer) { clearInterval(timer); timer = null; } }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) stop();
+    else { start(); window.Leash?.silentRefresh?.(); }
+  });
+  start();
+})();
 </script>
 {% endblock %}

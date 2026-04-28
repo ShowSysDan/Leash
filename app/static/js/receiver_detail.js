@@ -6,17 +6,66 @@ document.addEventListener('DOMContentLoaded', () => {
   if (!receiverId) return;
 
   // ── Refresh device info ─────────────────────────────────────────────────
-  document.getElementById('btn-poll')?.addEventListener('click', async () => {
-    const data = await window.Leash.pollReceiver(receiverId);
+  function applyDeviceInfo(data) {
     if (!data) return;
-    document.getElementById('detail-hostname').textContent  = data.hostname || '—';
-    document.getElementById('detail-status').textContent    = data.status;
-    document.getElementById('detail-firmware').textContent  = data.firmware_version || '—';
-    document.getElementById('detail-serial').textContent    = data.serial_number || '—';
-    document.getElementById('detail-format').textContent    = data.video_format || '—';
-    if (data.current_source)
-      document.getElementById('detail-current-source').textContent = data.current_source;
-  });
+    const hn = document.getElementById('detail-hostname');
+    if (hn) hn.textContent = data.hostname || '—';
+    const st = document.getElementById('detail-status');
+    if (st) st.textContent = data.status;
+    const fw = document.getElementById('detail-firmware');
+    if (fw) fw.textContent = data.firmware_version || '—';
+    const sn = document.getElementById('detail-serial');
+    if (sn) sn.textContent = data.serial_number || '—';
+    const vf = document.getElementById('detail-format');
+    if (vf) vf.textContent = data.video_format || '—';
+    if (data.current_source) {
+      const cs = document.getElementById('detail-current-source');
+      if (cs) cs.textContent = data.current_source;
+      const sel = document.getElementById('detail-source-select');
+      if (sel && sel.value !== data.current_source) {
+        if (!Array.from(sel.options).some(o => o.value === data.current_source)) {
+          sel.insertBefore(new Option(data.current_source, data.current_source), sel.options[1]);
+        }
+        sel.value = data.current_source;
+      }
+    }
+  }
+
+  // Manual button hits the live device. Background poll reads the DB
+  // (kept fresh by the backend RECEIVER_POLL_INTERVAL job) so the UI
+  // updates without firing a fresh 3-call burst per tick.
+  async function refreshFromDevice() {
+    try {
+      const data = await window.Leash.pollReceiver(receiverId);
+      applyDeviceInfo(data);
+    } catch (_e) { /* network blip */ }
+  }
+
+  async function refreshFromDb() {
+    try {
+      const resp = await fetch(`/api/receivers/${receiverId}`);
+      if (!resp.ok) return;
+      applyDeviceInfo(await resp.json());
+    } catch (_e) { /* network blip */ }
+  }
+
+  document.getElementById('btn-poll')?.addEventListener('click', refreshFromDevice);
+
+  // Auto-refresh every 15s so out-of-band source changes show up.
+  (function () {
+    const INTERVAL_MS = 15000;
+    let timer = null;
+    function start() {
+      if (timer) return;
+      timer = setInterval(() => { if (!document.hidden) refreshFromDb(); }, INTERVAL_MS);
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; } }
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) stop();
+      else { start(); refreshFromDb(); }
+    });
+    start();
+  })();
 
   // ── Reboot / restart ───────────────────────────────────────────────────
   document.getElementById('btn-reboot')?.addEventListener('click', () =>
