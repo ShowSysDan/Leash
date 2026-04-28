@@ -6,13 +6,11 @@
   <h4 class="mb-0 text-light">
     NDI Receivers
     <span class="badge bg-secondary ms-1" id="total-count">{{ receivers|length }}</span>
-    <span class="ms-2 small text-success" id="online-count">
-      {{ receivers|selectattr('status','equalto','online')|list|length }} online
-    </span>
+    {% set online_count = receivers|selectattr('status','equalto','online')|list|length %}
     {% set offline_count = receivers|selectattr('status','equalto','offline')|list|length %}
-    {% if offline_count %}
-    <span class="ms-1 small text-danger">/ {{ offline_count }} offline</span>
-    {% endif %}
+    <span class="ms-2 small text-success" id="online-count">
+      {{ online_count }} online{% if offline_count %} / {{ offline_count }} offline{% endif %}
+    </span>
   </h4>
   <div class="ms-auto d-flex gap-2">
     <div class="form-check form-switch mt-1" title="Show offline receivers">
