@@ -80,3 +80,22 @@ def update_settings():
         return _err("; ".join(errors))
 
     return jsonify({"updated": updated, "errors": errors})
+
+
+@settings_api_bp.route("/settings/syslog/test", methods=["POST"])
+@admin_required
+def test_syslog():
+    """Emit a test record on the leash.audit logger and report the outcome."""
+    from app.services.syslog_service import send_test_message
+    body = request.get_json(silent=True) or {}
+    message = (body.get("message") or "Leash syslog test").strip()[:200]
+    result = send_test_message(current_app._get_current_object(), message)
+    return jsonify(result)
+
+
+@settings_api_bp.route("/diagnostics/tcp", methods=["GET"])
+@admin_required
+def diagnostics_tcp():
+    """Counts of TCP sockets held by this worker process, by state."""
+    from app.services.diagnostics import get_tcp_summary
+    return jsonify(get_tcp_summary())

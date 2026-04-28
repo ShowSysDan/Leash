@@ -1,5 +1,4 @@
 import logging
-import logging.handlers
 import os
 from pathlib import Path
 
@@ -16,36 +15,6 @@ migrate = Migrate()
 logger = logging.getLogger(__name__)
 
 
-def _configure_syslog(app: Flask) -> None:
-    """Attach a SysLogHandler to the 'leash' logger hierarchy.
-
-    Tries the Unix domain socket (/dev/log on Linux, /var/run/syslog on macOS).
-    Falls back silently if syslog is not available so the app still starts.
-    """
-    level = logging.DEBUG if app.debug else logging.INFO
-    fmt = logging.Formatter("leash %(name)s %(levelname)s: %(message)s")
-
-    for addr in ("/dev/log", "/var/run/syslog"):
-        try:
-            handler = logging.handlers.SysLogHandler(
-                address=addr,
-                facility=logging.handlers.SysLogHandler.LOG_LOCAL0,
-            )
-            handler.setFormatter(fmt)
-            handler.setLevel(level)
-
-            leash_log = logging.getLogger("leash")
-            leash_log.setLevel(level)
-            # Avoid double-adding on reloads (e.g. Flask debug reloader)
-            if not any(isinstance(h, logging.handlers.SysLogHandler) for h in leash_log.handlers):
-                leash_log.addHandler(handler)
-
-            app.logger.info("Leash: syslog handler attached (%s, LOCAL0)", addr)
-            return
-        except OSError:
-            continue
-
-    app.logger.warning("Leash: syslog socket not found — audit events will not go to syslog")
 
 
 def _ensure_pg_schema(app: Flask) -> None:
@@ -169,13 +138,14 @@ def create_app(config_name: str = "default") -> Flask:
     # Register auth before_request hooks and context processors
     init_auth(app)
 
-    _configure_syslog(app)
-
     with app.app_context():
         _auto_migrate(app)
         # Load DB-persisted settings into app.config (seeds defaults on first boot).
         from app.services.settings_service import load_into_app as _load_settings
         _load_settings(app)
+        # Attach syslog handler now that SYSLOG_* settings are in app.config.
+        from app.services.syslog_service import apply_syslog_config
+        apply_syslog_config(app)
 
     # Start the background scheduler — only in the real worker process, not
     # Flask's reloader monitor parent (which never serves requests).

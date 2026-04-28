@@ -425,6 +425,40 @@ class ScheduledRecall(db.Model):
         return d
 
 
+# ── Device Events (action history) ────────────────────────────────────────
+
+class DeviceEvent(db.Model):
+    """Persisted record of notable receiver activity.
+
+    Mirrors the events that go to syslog via app.services.audit_log so the
+    history survives log rotation and can be displayed in-app per receiver.
+    """
+    __tablename__ = "device_events"
+
+    id = db.Column(db.Integer, primary_key=True)
+    receiver_id = db.Column(
+        db.Integer,
+        db.ForeignKey("ndi_receivers.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    # IP captured at event time so deleted-receiver history still makes sense
+    ip_address = db.Column(db.String(40))
+    event_type = db.Column(db.String(40), nullable=False, index=True)
+    detail = db.Column(db.String(500))
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "receiver_id": self.receiver_id,
+            "ip_address": self.ip_address,
+            "event_type": self.event_type,
+            "detail": self.detail,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+        }
+
+
 # ── App Settings ─────────────────────────────────────────────────────────
 
 class AppSetting(db.Model):

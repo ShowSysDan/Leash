@@ -176,6 +176,15 @@
     editBtn.setAttribute('data-persist-minutes', s.persist_minutes);
     actionsWrap.appendChild(editBtn);
 
+    const dupBtn = h('button', {
+      class: 'btn btn-xs btn-outline-info btn-duplicate-sched',
+      title: 'Duplicate & reschedule',
+      html: '<i class="bi bi-files"></i>',
+    });
+    dupBtn.setAttribute('data-sched-id', s.id);
+    dupBtn.setAttribute('data-sched-name', s.name);
+    actionsWrap.appendChild(dupBtn);
+
     const delBtn = h('button', {
       class: 'btn btn-xs btn-outline-danger btn-delete-sched',
       title: 'Delete',
@@ -204,7 +213,12 @@
 
   // ── modal helpers ──────────────────────────────────────────────────────────
 
+  // duplicateOf is set to the source schedule's id when the modal is opened
+  // for "duplicate & reschedule"; cleared otherwise.
+  let duplicateOf = null;
+
   function clearModal() {
+    duplicateOf = null;
     document.getElementById('sched-edit-id').value = '';
     document.getElementById('schedule-modal-title').textContent = 'Add Schedule';
     document.getElementById('sched-name').value = '';
@@ -286,8 +300,17 @@
       if (mode === 'weekly_until' && endDate) body.end_date = endDate;
     }
 
-    const url    = editId ? `/api/schedules/${editId}` : '/api/schedules';
-    const method = editId ? 'PUT' : 'POST';
+    let url, method;
+    if (duplicateOf) {
+      url = `/api/schedules/${duplicateOf}/duplicate`;
+      method = 'POST';
+    } else if (editId) {
+      url = `/api/schedules/${editId}`;
+      method = 'PUT';
+    } else {
+      url = '/api/schedules';
+      method = 'POST';
+    }
 
     const resp = await fetch(url, {
       method,
@@ -302,7 +325,11 @@
     }
 
     modal.hide();
-    if (editId) {
+    if (duplicateOf) {
+      duplicateOf = null;
+      appendRow(data);
+      window.Leash.toast('Schedule duplicated', 'success');
+    } else if (editId) {
       renderRow(data);
       window.Leash.toast('Schedule updated', 'success');
     } else {
@@ -347,6 +374,21 @@
 
     root.querySelector('.btn-edit-sched')?.addEventListener('click', function () {
       openEditModal(this);
+    });
+
+    root.querySelector('.btn-duplicate-sched')?.addEventListener('click', function () {
+      // Reuse the edit form pre-filled from the sibling .btn-edit-sched data,
+      // then flip into duplicate mode so save POSTs to /duplicate.
+      const editBtn = root.querySelector('.btn-edit-sched');
+      if (!editBtn) return;
+      openEditModal(editBtn);
+      duplicateOf = this.dataset.schedId;
+      document.getElementById('sched-edit-id').value = '';
+      document.getElementById('schedule-modal-title').textContent = 'Duplicate & Reschedule';
+      const nameInput = document.getElementById('sched-name');
+      if (nameInput && !nameInput.value.endsWith('(copy)')) nameInput.value += ' (copy)';
+      // Default the duplicate to disabled — user typically wants to set new date first.
+      document.getElementById('sched-enabled').checked = false;
     });
 
     root.querySelector('.btn-delete-sched')?.addEventListener('click', async function () {

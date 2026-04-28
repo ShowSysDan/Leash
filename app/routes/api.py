@@ -32,7 +32,7 @@ import aiohttp
 from flask import Blueprint, current_app, jsonify, request
 
 from app import db
-from app.models import NDIReceiver, NDISource, PTZCamera
+from app.models import DeviceEvent, NDIReceiver, NDISource, PTZCamera
 from app.services.audit_log import (
     device_error,
     receiver_added,
@@ -459,6 +459,31 @@ def bulk_reload():
 # ---------------------------------------------------------------------------
 # Receivers — settings groups (generic pass-through)
 # ---------------------------------------------------------------------------
+
+
+@api_bp.route("/receivers/<int:receiver_id>/history", methods=["GET"])
+def receiver_history(receiver_id: int):
+    """Return up to ?limit=N (default 100, max 500) most recent device events.
+
+    Includes any rows that match the receiver's current IP even if the
+    receiver_id FK was nulled out by a previous delete.
+    """
+    receiver = NDIReceiver.query.get_or_404(receiver_id)
+    limit = max(1, min(int(request.args.get("limit", 100)), 500))
+
+    events = (
+        DeviceEvent.query
+        .filter(
+            db.or_(
+                DeviceEvent.receiver_id == receiver_id,
+                DeviceEvent.ip_address == receiver.ip_address,
+            )
+        )
+        .order_by(DeviceEvent.timestamp.desc())
+        .limit(limit)
+        .all()
+    )
+    return jsonify([e.to_dict() for e in events])
 
 
 @api_bp.route("/receivers/<int:receiver_id>/settings/<group>", methods=["GET"])

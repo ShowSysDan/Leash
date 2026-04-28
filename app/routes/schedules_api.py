@@ -179,3 +179,47 @@ def stop_enforcement(sched_id: int):
     sched.updated_at = datetime.utcnow()
     db.session.commit()
     return jsonify(sched.to_dict())
+
+
+@schedules_api_bp.route("/schedules/<int:sched_id>/duplicate", methods=["POST"])
+def duplicate_schedule(sched_id: int):
+    """Clone a schedule. Useful for re-running a one-time event on a new date.
+
+    Optional body fields: name, run_date, end_date, time_of_day, days_of_week, schedule_mode.
+    Anything not provided is copied from the source. The clone starts disabled
+    and never inherits run history or enforcement state.
+    """
+    src = ScheduledRecall.query.get_or_404(sched_id)
+    body = request.get_json(silent=True) or {}
+
+    new_name = (body.get("name") or "").strip() or f"{src.name} (copy)"
+    new_mode = body.get("schedule_mode") or src.schedule_mode or "weekly"
+    new_time = body.get("time_of_day") or src.time_of_day
+    new_days = body.get("days_of_week", src.days_of_week or "")
+    new_run_date = body.get("run_date") or (src.run_date.isoformat() if src.run_date else None)
+    new_end_date = body.get("end_date") or (src.end_date.isoformat() if src.end_date else None)
+
+    proxy = {
+        "name": new_name,
+        "schedule_type": src.schedule_type,
+        "schedule_mode": new_mode,
+        "time_of_day": new_time,
+        "days_of_week": new_days,
+        "run_date": new_run_date,
+        "end_date": new_end_date,
+        "snapshot_id": src.snapshot_id,
+        "camera_id": src.camera_id,
+        "preset_number": src.preset_number,
+        "persistent": src.persistent,
+        "persist_minutes": src.persist_minutes,
+        "enabled": bool(body.get("enabled", False)),
+    }
+
+    data, err = _validate_body(proxy)
+    if err:
+        return _err(err)
+
+    clone = ScheduledRecall(**data)
+    db.session.add(clone)
+    db.session.commit()
+    return jsonify(clone.to_dict()), 201
