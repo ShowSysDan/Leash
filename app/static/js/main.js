@@ -151,6 +151,23 @@ window.Leash = (() => {
     return data;
   }
 
+  // ── Silent background refresh — updates cards without spinner/toast.
+  // Reads from the DB only (the backend poller keeps it fresh every
+  // RECEIVER_POLL_INTERVAL seconds), so it costs one cheap query and
+  // never hits the BirdDog devices directly.
+  async function silentRefresh() {
+    try {
+      const resp = await fetch('/api/receivers');
+      if (!resp.ok) return;
+      const receivers = await resp.json();
+      receivers.forEach(r => {
+        try { updateReceiverCard(r); }
+        catch (e) { console.warn('updateReceiverCard failed for', r?.id, e); }
+      });
+      updateSummary(receivers);
+    } catch (_e) { /* network blip — next tick will retry */ }
+  }
+
   // ── Bulk reload ─────────────────────────────────────────────────────────
   async function bulkReload() {
     const btn = document.getElementById('btn-bulk-reload');
@@ -415,7 +432,7 @@ window.Leash = (() => {
   document.addEventListener('DOMContentLoaded', bindDashboard);
 
   return {
-    toast, pollReceiver, bulkReload, scanNetwork,
+    toast, pollReceiver, bulkReload, silentRefresh, scanNetwork,
     discoverSources, setSource, rebootReceiver, rebootAll, restartReceiver,
     removeReceiver,
   };
