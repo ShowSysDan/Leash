@@ -529,10 +529,18 @@ def _poll_receiver_sources(app) -> None:
     Lightweight poll: fetch the current NDI source from every online receiver
     and persist the result.  Runs every RECEIVER_POLL_INTERVAL seconds.
     Uses bulk_fetch_source (one HTTP call per device) so it is fast and cheap.
+
+    Also records online↔offline transitions and source drift to the audit log
+    so the receiver detail page can show a history.
     """
     with app.app_context():
         from app import db
         from app.models import NDIReceiver
+        from app.services.audit_log import (
+            receiver_came_online,
+            receiver_went_offline,
+            source_changed,
+        )
         from app.services.birddog_client import bulk_fetch_source, client_config, run_async
 
         receivers = NDIReceiver.query.all()
@@ -548,15 +556,44 @@ def _poll_receiver_sources(app) -> None:
 
         result_map = {r["id"]: r for r in results}
         now = datetime.utcnow()
+        transitions: list[tuple[str, str, str]] = []   # (kind, ip, hostname)
+        source_changes: list[tuple[str, str, str | None, str]] = []  # (label, ip, old, new)
 
         for recv in receivers:
             r = result_map.get(recv.id)
             if not r:
                 continue
-            recv.status = "online" if r["online"] else "offline"
-            if r.get("current_source") is not None:
-                recv.current_source = r["current_source"]
+            new_status = "online" if r["online"] else "offline"
+            prev_status = recv.status
+            new_source = r.get("current_source")
+
+            if prev_status != new_status:
+                if new_status == "online":
+                    transitions.append(("online", recv.ip_address, recv.hostname or recv.display_name))
+                elif prev_status == "online":
+                    transitions.append(("offline", recv.ip_address, recv.hostname or recv.display_name))
+
+            if new_source is not None and new_source != recv.current_source:
+                source_changes.append(
+                    (recv.display_name, recv.ip_address, recv.current_source, new_source)
+                )
+
+            recv.status = new_status
+            if new_source is not None:
+                recv.current_source = new_source
             recv.updated_at = now
 
         db.session.commit()
-        logger.debug("Receiver poll: updated %d receivers", len(receivers))
+
+        for kind, ip, hostname in transitions:
+            if kind == "online":
+                receiver_came_online(ip, hostname)
+            else:
+                receiver_went_offline(ip, hostname)
+        for label, ip, old, new in source_changes:
+            source_changed(label, ip, old, new, via="device")
+
+        logger.debug(
+            "Receiver poll: updated %d receivers (%d transitions, %d source changes)",
+            len(receivers), len(transitions), len(source_changes),
+        )

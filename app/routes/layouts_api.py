@@ -7,9 +7,12 @@ GET    /api/layouts/<id>                    get layout with positions
 PUT    /api/layouts/<id>                    update name / description / bg_color
 DELETE /api/layouts/<id>                    delete layout
 PUT    /api/layouts/<id>/positions          save all positions at once (full replace)
-POST   /api/layouts/<id>/generate-group     create/sync a receiver group from layout
 POST   /api/layouts/<id>/receivers          add a receiver to layout (default pos 10,10)
 DELETE /api/layouts/<id>/receivers/<rid>    remove receiver from layout
+
+Each layout has a ReceiverGroup auto-managed in lockstep — created on layout
+creation, renamed when the layout is renamed, membership synced on every
+receiver add/remove/save_positions, and deleted when the layout is deleted.
 """
 from datetime import datetime
 
@@ -27,6 +30,49 @@ from app.routes._helpers import (
 layouts_api_bp = Blueprint("layouts_api", __name__)
 
 _DEFAULT_BG = "#0a1628"
+
+
+def _sync_layout_group(layout: Layout, *, previous_name: str | None = None) -> None:
+    """Keep a ReceiverGroup in lockstep with this layout.
+
+    Membership = the layout's positioned receivers. Name follows the layout.
+    Called from every endpoint that mutates a layout's identity or membership.
+    Caller is responsible for db.session.commit().
+    """
+    target_name = layout.name
+    receiver_ids = [p.receiver_id for p in layout.positions]
+    receivers = (
+        NDIReceiver.query.filter(NDIReceiver.id.in_(receiver_ids)).all()
+        if receiver_ids else []
+    )
+
+    # Find the existing auto-group: prefer its previous name (handles renames),
+    # falling back to current name.
+    group = None
+    if previous_name and previous_name != target_name:
+        group = ReceiverGroup.query.filter_by(name=previous_name).first()
+    if group is None:
+        group = ReceiverGroup.query.filter_by(name=target_name).first()
+
+    if group is None:
+        group = ReceiverGroup(
+            name=target_name,
+            description=f"Auto-generated from layout: {target_name}",
+        )
+        db.session.add(group)
+    else:
+        group.name = target_name
+        if not group.description or group.description.startswith("Auto-generated from layout"):
+            group.description = f"Auto-generated from layout: {target_name}"
+
+    group.receivers = receivers
+
+
+def _delete_layout_group(layout_name: str) -> None:
+    """Remove the auto-generated group when a layout is deleted."""
+    group = ReceiverGroup.query.filter_by(name=layout_name).first()
+    if group:
+        db.session.delete(group)
 
 
 @layouts_api_bp.route("/layouts", methods=["GET"])
@@ -48,6 +94,8 @@ def create_layout():
 
     layout = Layout(name=name, description=desc, bg_color=bg)
     db.session.add(layout)
+    db.session.flush()
+    _sync_layout_group(layout)
     db.session.commit()
     return jsonify(layout.to_dict(include_positions=True)), 201
 
@@ -63,10 +111,15 @@ def update_layout(layout_id: int):
     layout = Layout.query.get_or_404(layout_id)
     body = request.get_json(silent=True) or {}
 
+    previous_name = layout.name
+    name_changed = False
+
     if "name" in body:
         ok, name = valid_name(body["name"])
         if not ok:
             return _err("name is required (max 100 characters)")
+        if name != layout.name:
+            name_changed = True
         layout.name = name
     if "description" in body:
         layout.description = (body["description"] or "").strip()[:MAX_DESCRIPTION]
@@ -76,6 +129,8 @@ def update_layout(layout_id: int):
         layout.bg_color = body["bg_color"]
 
     layout.updated_at = datetime.utcnow()
+    if name_changed:
+        _sync_layout_group(layout, previous_name=previous_name)
     db.session.commit()
     return jsonify(layout.to_dict())
 
@@ -83,6 +138,7 @@ def update_layout(layout_id: int):
 @layouts_api_bp.route("/layouts/<int:layout_id>", methods=["DELETE"])
 def delete_layout(layout_id: int):
     layout = Layout.query.get_or_404(layout_id)
+    _delete_layout_group(layout.name)
     db.session.delete(layout)
     db.session.commit()
     return jsonify({"deleted": layout_id})
@@ -123,33 +179,10 @@ def save_positions(layout_id: int):
             label.y_pct = float(ld.get("y_pct", label.y_pct))
 
     layout.updated_at = datetime.utcnow()
+    db.session.flush()
+    _sync_layout_group(layout)
     db.session.commit()
     return jsonify(layout.to_dict(include_positions=True))
-
-
-@layouts_api_bp.route("/layouts/<int:layout_id>/generate-group", methods=["POST"])
-def generate_group(layout_id: int):
-    """Create or update a ReceiverGroup matching the layout's name and receivers."""
-    layout = Layout.query.get_or_404(layout_id)
-    receiver_ids = [p.receiver_id for p in layout.positions]
-    receivers = NDIReceiver.query.filter(NDIReceiver.id.in_(receiver_ids)).all() if receiver_ids else []
-
-    group = ReceiverGroup.query.filter_by(name=layout.name).first()
-    if group:
-        group.receivers = receivers
-        action = "updated"
-    else:
-        group = ReceiverGroup(
-            name=layout.name,
-            description=f"Auto-generated from layout: {layout.name}",
-        )
-        group.receivers = receivers
-        db.session.add(group)
-        action = "created"
-
-    db.session.commit()
-    return jsonify({"action": action, "group": group.to_dict(include_receivers=False),
-                    "receiver_count": len(receivers)})
 
 
 @layouts_api_bp.route("/layouts/<int:layout_id>/labels", methods=["POST"])
@@ -203,6 +236,8 @@ def add_receiver_to_layout(layout_id: int):
         y_pct=float(body.get("y_pct", y)),
     )
     db.session.add(pos)
+    db.session.flush()
+    _sync_layout_group(layout)
     db.session.commit()
     return jsonify(pos.to_dict()), 201
 
@@ -212,6 +247,9 @@ def remove_receiver_from_layout(layout_id: int, receiver_id: int):
     pos = LayoutPosition.query.filter_by(
         layout_id=layout_id, receiver_id=receiver_id
     ).first_or_404()
+    layout = Layout.query.get_or_404(layout_id)
     db.session.delete(pos)
+    db.session.flush()
+    _sync_layout_group(layout)
     db.session.commit()
     return jsonify({"deleted": receiver_id})

@@ -7,11 +7,6 @@
     <span class="badge bg-secondary ms-1">{{ layouts|length }}</span>
   </h4>
   <div class="ms-auto d-flex gap-2">
-    {% if layouts %}
-    <button class="btn btn-sm btn-outline-info" id="btn-generate-all-groups">
-      <i class="bi bi-people me-1"></i>Generate All Groups
-    </button>
-    {% endif %}
     <button class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#createLayoutModal">
       <i class="bi bi-plus-circle me-1"></i>New Layout
     </button>
@@ -21,6 +16,7 @@
 <p class="text-muted small mb-3">
   Layouts let you arrange receiver cards on a spatial canvas matching your physical installation
   — just like the QSYS panels.  Open a layout to control sources from the map view.
+  A receiver group is automatically created and kept in sync with each layout.
 </p>
 
 {% if not layouts %}
@@ -43,18 +39,14 @@
             <strong>{{ layout.name }}</strong><br>
             <small class="text-muted">{{ layout.receiver_count }} receivers</small>
           </div>
-          <div class="ms-auto d-flex gap-1">
+          <div class="ms-auto d-flex gap-1 align-items-center">
             <a href="{{ url_for('main.layout_view', layout_id=layout.id) }}"
-               class="btn btn-xs btn-primary" title="Open layout">
-              <i class="bi bi-arrows-fullscreen"></i>
+               class="btn btn-sm btn-primary" title="Open layout">
+              <i class="bi bi-arrows-fullscreen me-1"></i>Open
             </a>
-            <button class="btn btn-xs btn-outline-info btn-gen-group"
-                    data-layout-id="{{ layout.id }}" data-layout-name="{{ layout.name }}"
-                    title="Generate receiver group from this layout">
-              <i class="bi bi-people"></i>
-            </button>
             <button class="btn btn-xs btn-outline-danger btn-delete-layout"
-                    data-layout-id="{{ layout.id }}" data-layout-name="{{ layout.name }}">
+                    data-layout-id="{{ layout.id }}" data-layout-name="{{ layout.name }}"
+                    title="Delete layout">
               <i class="bi bi-trash"></i>
             </button>
           </div>
@@ -129,41 +121,5 @@ document.querySelectorAll('.btn-delete-layout').forEach(btn => {
   });
 });
 
-async function generateGroup(layoutId, layoutName) {
-  const resp = await fetch(`/api/layouts/${layoutId}/generate-group`, { method: 'POST' });
-  const data = await resp.json();
-  if (resp.ok) {
-    window.Leash.toast(
-      `Group "${layoutName}" ${data.action} (${data.receiver_count} receivers)`,
-      'success'
-    );
-  } else {
-    window.Leash.toast(data.error || 'Failed to generate group', 'danger');
-  }
-}
-
-document.querySelectorAll('.btn-gen-group').forEach(btn => {
-  btn.addEventListener('click', () => generateGroup(btn.dataset.layoutId, btn.dataset.layoutName));
-});
-
-document.getElementById('btn-generate-all-groups')?.addEventListener('click', async () => {
-  const btns = document.querySelectorAll('.btn-gen-group');
-  let created = 0, updated = 0, failed = 0;
-  for (const btn of btns) {
-    const resp = await fetch(`/api/layouts/${btn.dataset.layoutId}/generate-group`, { method: 'POST' });
-    if (resp.ok) {
-      const d = await resp.json();
-      if (d.action === 'created') created++; else updated++;
-    } else {
-      failed++;
-    }
-  }
-  const msg = [
-    created && `${created} created`,
-    updated && `${updated} updated`,
-    failed  && `${failed} failed`,
-  ].filter(Boolean).join(', ');
-  window.Leash.toast(`Groups: ${msg}`, failed ? 'warning' : 'success');
-});
 </script>
 {% endblock %}

@@ -70,6 +70,19 @@ SETTINGS_SCHEMA: list[dict] = [
          group="Authentication", label="Forgot Password URL",
          description="URL of the external auth app where users can reset their password. "
                      "Shown as a link on the login page and in must-change-password warnings."),
+    # Syslog
+    dict(key="SYSLOG_ENABLED",      type="bool",   default="true",
+         group="Syslog", label="Enable Syslog",
+         description="Send audit events to syslog. Disable to silence syslog without changing other settings."),
+    dict(key="SYSLOG_HOST",         type="string", default="",
+         group="Syslog", label="Remote Syslog Host",
+         description="Hostname or IP for a remote syslog server. Leave empty to log to the local Unix socket."),
+    dict(key="SYSLOG_PORT",         type="int",    default="514",
+         group="Syslog", label="Remote Syslog Port",
+         description="UDP port of the remote syslog server (only used when host is set)."),
+    dict(key="SYSLOG_FACILITY",     type="string", default="local0",
+         group="Syslog", label="Facility",
+         description="Syslog facility name (e.g. local0–local7, user, daemon)."),
 ]
 
 _SCHEMA_MAP: dict[str, dict] = {s["key"]: s for s in SETTINGS_SCHEMA}
@@ -203,6 +216,14 @@ def update_setting(app, key: str, raw_value: str) -> None:
                 logger.info("Settings: rescheduled job %s → %ds", job_id, coerced)
             except Exception:
                 logger.exception("Settings: could not reschedule job %s", job_id)
+
+    # Reapply syslog handler when any SYSLOG_* setting changes
+    if key.startswith("SYSLOG_"):
+        try:
+            from app.services.syslog_service import apply_syslog_config
+            apply_syslog_config(app)
+        except Exception:
+            logger.exception("Settings: failed to reapply syslog config")
 
 
 def all_settings_dicts(mask_sensitive: bool = True) -> list[dict]:

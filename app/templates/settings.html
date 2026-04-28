@@ -19,6 +19,55 @@
       </div>
     </div>
 
+    <!-- TCP diagnostics — read-only, polled -->
+    <div class="card mb-4 border-secondary">
+      <div class="card-header d-flex align-items-center gap-2">
+        <i class="bi bi-diagram-3 text-warning"></i>
+        <strong>TCP Connections</strong>
+        <small class="text-muted ms-2 d-none d-md-inline">
+          Sockets held by this Leash worker (pid <span id="tcp-pid">—</span>)
+        </small>
+        <span class="ms-auto badge bg-secondary" id="tcp-source">—</span>
+        <button type="button" class="btn btn-sm btn-outline-secondary ms-2" id="btn-tcp-refresh"
+                title="Refresh now">
+          <i class="bi bi-arrow-clockwise"></i>
+        </button>
+      </div>
+      <div class="card-body">
+        <div id="tcp-unavailable" class="text-warning small" style="display:none">
+          <i class="bi bi-exclamation-triangle me-1"></i>
+          <span id="tcp-unavailable-reason"></span>
+        </div>
+        <div class="row text-center g-2" id="tcp-summary">
+          <div class="col">
+            <div class="display-6 fw-bold text-info" id="tcp-total">—</div>
+            <small class="text-muted">Total</small>
+          </div>
+          <div class="col">
+            <div class="display-6 fw-bold text-success" id="tcp-active">—</div>
+            <small class="text-muted">Active</small>
+          </div>
+          <div class="col">
+            <div class="display-6 fw-bold text-warning" id="tcp-dead">—</div>
+            <small class="text-muted">Dead / Lingering</small>
+          </div>
+          <div class="col">
+            <div class="display-6 fw-bold text-secondary" id="tcp-listen">—</div>
+            <small class="text-muted">Listening</small>
+          </div>
+        </div>
+        <div class="mt-3 small">
+          <strong class="text-muted">Per-state breakdown:</strong>
+          <div id="tcp-states" class="mt-1 d-flex flex-wrap gap-2"></div>
+        </div>
+        <div class="form-text text-muted mt-2">
+          Polled every 10 s. <strong>CLOSE_WAIT</strong> growing without bound usually means a peer
+          closed the connection but the app didn't release its socket — the classic stuck-socket
+          symptom.
+        </div>
+      </div>
+    </div>
+
     <form id="settings-form" novalidate>
       {% for group_name, settings in setting_groups.items() %}
       <div class="card mb-4">
@@ -33,14 +82,33 @@
             <i class="bi bi-lightning-charge text-success"></i>
           {% elif group_name == "External API" %}
             <i class="bi bi-key text-danger"></i>
+          {% elif group_name == "Syslog" %}
+            <i class="bi bi-journal-text text-info"></i>
           {% else %}
             <i class="bi bi-sliders"></i>
           {% endif %}
           <strong>{{ group_name }}</strong>
+          {% if group_name == "Syslog" %}
+          <button type="button" class="btn btn-sm btn-outline-info ms-auto" id="btn-syslog-test"
+                  title="Send a test record to the configured syslog target">
+            <i class="bi bi-send me-1"></i>Send Test
+          </button>
+          {% endif %}
         </div>
         <div class="card-body">
           {% for s in settings %}
           <div class="mb-3">
+            {% if s.type == "bool" %}
+            <div class="form-check form-switch">
+              <input type="checkbox"
+                     class="form-check-input setting-input"
+                     id="field-{{ s.key }}"
+                     data-key="{{ s.key }}"
+                     data-bool="true"
+                     {% if s.value in ('1','true','True','yes') %}checked{% endif %}>
+              <label class="form-check-label fw-semibold" for="field-{{ s.key }}">{{ s.label }}</label>
+            </div>
+            {% else %}
             <label class="form-label fw-semibold" for="field-{{ s.key }}">{{ s.label }}</label>
             {% if s.sensitive %}
             <input type="password"
@@ -63,6 +131,7 @@
                    id="field-{{ s.key }}"
                    data-key="{{ s.key }}"
                    value="{{ s.value }}">
+            {% endif %}
             {% endif %}
             {% if s.description %}
             <div class="form-text text-secondary">{{ s.description }}</div>
@@ -89,6 +158,93 @@
 (function () {
   'use strict';
 
+  // ── TCP diagnostics ──────────────────────────────────────────────────
+  const STATE_BADGES = {
+    ESTABLISHED: 'bg-success',
+    CLOSE_WAIT:  'bg-danger',
+    TIME_WAIT:   'bg-warning text-dark',
+    FIN_WAIT1:   'bg-warning text-dark',
+    FIN_WAIT2:   'bg-warning text-dark',
+    LAST_ACK:    'bg-warning text-dark',
+    SYN_SENT:    'bg-info text-dark',
+    SYN_RECV:    'bg-info text-dark',
+    LISTEN:      'bg-secondary',
+    CLOSE:       'bg-secondary',
+    CLOSING:     'bg-warning text-dark',
+  };
+
+  async function refreshTcp() {
+    try {
+      const resp = await fetch('/api/diagnostics/tcp');
+      const data = await resp.json();
+      const unavail = document.getElementById('tcp-unavailable');
+      const summary = document.getElementById('tcp-summary');
+      if (!data.available) {
+        unavail.style.display = '';
+        document.getElementById('tcp-unavailable-reason').textContent = data.reason || 'unavailable';
+        summary.style.display = 'none';
+        return;
+      }
+      unavail.style.display = 'none';
+      summary.style.display = '';
+      document.getElementById('tcp-pid').textContent    = data.pid ?? '—';
+      document.getElementById('tcp-source').textContent = data.source || '';
+      document.getElementById('tcp-total').textContent  = data.total ?? 0;
+      document.getElementById('tcp-active').textContent = data.active ?? 0;
+      document.getElementById('tcp-dead').textContent   = data.dead_or_lingering ?? 0;
+      document.getElementById('tcp-listen').textContent = data.listening ?? 0;
+
+      const states = document.getElementById('tcp-states');
+      states.textContent = '';
+      const entries = Object.entries(data.by_state || {}).sort((a, b) => b[1] - a[1]);
+      if (!entries.length) {
+        const span = document.createElement('span');
+        span.className = 'text-muted small';
+        span.textContent = '(none)';
+        states.appendChild(span);
+      } else {
+        entries.forEach(([state, count]) => {
+          const badge = document.createElement('span');
+          badge.className = `badge ${STATE_BADGES[state] || 'bg-secondary'}`;
+          badge.textContent = `${state}: ${count}`;
+          states.appendChild(badge);
+        });
+      }
+    } catch (_e) {
+      // Silent on transient errors — the polling loop will retry.
+    }
+  }
+  document.getElementById('btn-tcp-refresh')?.addEventListener('click', refreshTcp);
+  refreshTcp();
+  setInterval(refreshTcp, 10000);
+
+  // Syslog "Send Test" button
+  document.getElementById('btn-syslog-test')?.addEventListener('click', async (ev) => {
+    const btn = ev.currentTarget;
+    btn.disabled = true;
+    try {
+      const resp = await fetch('/api/settings/syslog/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        window.Leash.toast(data.error || 'Test failed', 'danger');
+        return;
+      }
+      if (data.sent) {
+        window.Leash.toast(`Test sent → ${data.target}`, 'success');
+      } else {
+        window.Leash.toast(data.reason || 'Test message could not be sent', 'warning');
+      }
+    } catch (_e) {
+      window.Leash.toast('Network error', 'danger');
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   document.querySelectorAll('.btn-save-group').forEach(btn => {
     btn.addEventListener('click', async () => {
       const groupName = btn.dataset.group;
@@ -99,6 +255,10 @@
       const payload = {};
       for (const input of inputs) {
         const key = input.dataset.key;
+        if (input.dataset.bool === 'true') {
+          payload[key] = input.checked ? 'true' : 'false';
+          continue;
+        }
         const val = input.value.trim();
         // Skip sensitive fields left blank or unchanged (placeholder value)
         if (input.dataset.sensitive === 'true' && (val === '' || val === '***')) continue;

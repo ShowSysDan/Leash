@@ -31,8 +31,89 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!sel?.value) return;
     window.Leash.setSource(receiverId, sel.value).then(() => {
       document.getElementById('detail-current-source').textContent = sel.value;
+      loadHistory();
     });
   });
+
+  // ── Activity history ───────────────────────────────────────────────────
+  // Server text fields are device/operator-supplied — render with textContent.
+  const EVENT_BADGES = {
+    SOURCE_CHANGE:        'bg-success',
+    SOURCE_CHANGE_FAILED: 'bg-warning text-dark',
+    RECEIVER_ONLINE:      'bg-success',
+    RECEIVER_OFFLINE:     'bg-danger',
+    RECEIVER_ADDED:       'bg-info text-dark',
+    DEVICE_ERROR:         'bg-danger',
+  };
+
+  function fmtTimestamp(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso + 'Z');
+    return isNaN(d) ? iso : d.toLocaleString();
+  }
+
+  function renderHistory(events) {
+    const tbody   = document.getElementById('history-body');
+    const wrap    = document.getElementById('history-wrap');
+    const empty   = document.getElementById('history-empty');
+    const loading = document.getElementById('history-loading');
+    const summary = document.getElementById('history-summary');
+
+    if (loading) loading.style.display = 'none';
+    if (!tbody) return;
+
+    tbody.textContent = '';
+    if (!events || !events.length) {
+      if (wrap)  wrap.style.display  = 'none';
+      if (empty) empty.style.display = '';
+      if (summary) summary.textContent = '';
+      return;
+    }
+
+    if (empty) empty.style.display = 'none';
+    if (wrap)  wrap.style.display  = '';
+    if (summary) summary.textContent = `(${events.length} most recent)`;
+
+    events.forEach(e => {
+      const tr = document.createElement('tr');
+
+      const tdWhen = document.createElement('td');
+      tdWhen.className = 'text-muted font-monospace';
+      tdWhen.textContent = fmtTimestamp(e.timestamp);
+      tr.appendChild(tdWhen);
+
+      const tdType = document.createElement('td');
+      const badge = document.createElement('span');
+      badge.className = `badge ${EVENT_BADGES[e.event_type] || 'bg-secondary'}`;
+      badge.textContent = e.event_type;
+      tdType.appendChild(badge);
+      tr.appendChild(tdType);
+
+      const tdDetail = document.createElement('td');
+      tdDetail.textContent = e.detail || '';
+      tr.appendChild(tdDetail);
+
+      tbody.appendChild(tr);
+    });
+  }
+
+  async function loadHistory() {
+    const loading = document.getElementById('history-loading');
+    if (loading) loading.style.display = '';
+    try {
+      const resp = await fetch(`/api/receivers/${receiverId}/history?limit=100`);
+      if (!resp.ok) {
+        renderHistory([]);
+        return;
+      }
+      renderHistory(await resp.json());
+    } catch (_e) {
+      renderHistory([]);
+    }
+  }
+
+  document.getElementById('btn-refresh-history')?.addEventListener('click', loadHistory);
+  loadHistory();
 
   // ── Settings panels — lazy load on tab click ────────────────────────────
   // Settings keys and values come from the BirdDog device (untrusted).
@@ -119,10 +200,8 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // decode_status is read-only
-    if (group === 'decode_status') {
-      container.dataset.readonly = 'true';
-    }
+    // Receiver settings are display-only — write directly to the device instead.
+    container.dataset.readonly = 'true';
 
     renderSettingsForm(container, group, result.data);
   }

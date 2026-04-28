@@ -78,10 +78,48 @@
     </div>
   </div>
 
+  <!-- Activity history -->
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header d-flex align-items-center gap-2 py-2">
+        <i class="bi bi-clock-history text-info"></i>
+        <strong>Recent Activity</strong>
+        <small class="text-muted ms-1" id="history-summary"></small>
+        <button class="btn btn-xs btn-outline-secondary ms-auto" id="btn-refresh-history" title="Refresh">
+          <i class="bi bi-arrow-repeat"></i>
+        </button>
+      </div>
+      <div class="card-body p-0">
+        <div id="history-loading" class="text-muted small p-3">
+          <span class="spinner-border spinner-border-sm me-2"></span>Loading history…
+        </div>
+        <div id="history-empty" class="text-muted small p-3" style="display:none">
+          No activity recorded yet.
+        </div>
+        <div class="table-responsive" id="history-wrap" style="max-height:320px;overflow-y:auto;display:none">
+          <table class="table table-dark table-sm table-hover mb-0 small">
+            <thead class="sticky-top" style="top:0;z-index:1;background:#212529">
+              <tr>
+                <th style="width:14rem">When</th>
+                <th style="width:10rem">Event</th>
+                <th>Detail</th>
+              </tr>
+            </thead>
+            <tbody id="history-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Settings tabs -->
   <div class="col-12">
     <div class="card">
-      <div class="card-header">
+      <div class="card-header py-2 small text-muted d-flex align-items-center gap-1 border-bottom">
+        <i class="bi bi-eye"></i>
+        Read-only view of the device's live configuration.
+      </div>
+      <div class="card-header pt-2 pb-0">
         <ul class="nav nav-tabs card-header-tabs" id="settingsTabs">
           <li class="nav-item">
             <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-decode">Decode</button>
