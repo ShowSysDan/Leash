@@ -63,8 +63,12 @@ def _auto_migrate(app: Flask) -> None:
             logger.info("Leash: generating initial migration")
             flask_db_migrate(message="initial schema")
         else:
-            # Check if the live models differ from what the DB has.
-            # If so, auto-generate a migration so new tables/columns appear.
+            # Apply any pending migrations FIRST so the DB is at head before
+            # running autogenerate. Alembic refuses to create a new revision
+            # while the DB is behind ("Target database is not up to date"),
+            # so a half-finished previous deploy would otherwise wedge boot.
+            logger.info("Leash: applying pending migrations")
+            upgrade()
             if _schema_has_changes(app):
                 logger.info("Leash: schema drift detected — generating migration")
                 flask_db_migrate(message="auto schema update")
