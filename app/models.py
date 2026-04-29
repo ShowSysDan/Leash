@@ -117,8 +117,11 @@ class Layout(db.Model):
     # CSS colour for the canvas background
     bg_color = db.Column(db.String(20), default="#0a1628")
     # Manual ordering on the layouts list page; lower = earlier.
-    # New layouts default to 0 and get sorted alphabetically as a tiebreaker.
-    sort_order = db.Column(db.Integer, default=0, nullable=False, index=True)
+    # server_default backfills existing rows when this column is added to a
+    # populated table; the Python default keeps INSERTs working without it.
+    sort_order = db.Column(
+        db.Integer, default=0, server_default="0", nullable=False, index=True
+    )
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
