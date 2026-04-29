@@ -17,6 +17,7 @@
   Layouts let you arrange receiver cards on a spatial canvas matching your physical installation
   — just like the QSYS panels.  Open a layout to control sources from the map view.
   A receiver group is automatically created and kept in sync with each layout.
+  Drag the <i class="bi bi-grip-vertical"></i> handle on any card to reorder the list.
 </p>
 
 {% if not layouts %}
@@ -25,18 +26,19 @@
   No layouts yet. Create one to start building your floor plan.
 </div>
 {% else %}
-<div class="row g-3">
+<div class="row g-3" id="layouts-grid">
   {% for layout in layouts %}
-  <div class="col-md-4 col-lg-3">
-    <div class="card h-100">
-      <div class="card-body text-center py-4"
+  <div class="col-md-4 col-lg-3 layout-col" data-layout-id="{{ layout.id }}" draggable="true">
+    <div class="card h-100 layout-card">
+      <div class="card-body text-center py-4 position-relative"
            style="background: {{ layout.bg_color }}; border-radius: 0.375rem 0.375rem 0 0; min-height:80px;">
         <i class="bi bi-layout-three-columns display-6 text-white-50"></i>
+        <span class="layout-drag-handle" title="Drag to reorder"><i class="bi bi-grip-vertical"></i></span>
       </div>
       <div class="card-footer">
         <div class="d-flex align-items-center">
-          <div>
-            <strong>{{ layout.name }}</strong><br>
+          <div class="flex-grow-1 text-truncate">
+            <strong class="layout-name">{{ layout.name }}</strong><br>
             <small class="text-muted">{{ layout.receiver_count }} receivers</small>
           </div>
           <div class="ms-auto d-flex gap-1 align-items-center">
@@ -44,6 +46,14 @@
                class="btn btn-sm btn-primary" title="Open layout">
               <i class="bi bi-arrows-fullscreen me-1"></i>Open
             </a>
+            <button class="btn btn-xs btn-outline-secondary btn-edit-layout"
+                    data-layout-id="{{ layout.id }}"
+                    data-layout-name="{{ layout.name }}"
+                    data-layout-description="{{ layout.description or '' }}"
+                    data-layout-bg="{{ layout.bg_color }}"
+                    title="Edit layout">
+              <i class="bi bi-pencil"></i>
+            </button>
             <button class="btn btn-xs btn-outline-danger btn-delete-layout"
                     data-layout-id="{{ layout.id }}" data-layout-name="{{ layout.name }}"
                     title="Delete layout">
@@ -87,6 +97,37 @@
     </div>
   </div>
 </div>
+
+<!-- Edit Layout Modal -->
+<div class="modal fade" id="editLayoutModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Edit Layout</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="el-id">
+        <div class="mb-3">
+          <label class="form-label">Name</label>
+          <input type="text" id="el-name" class="form-control" maxlength="100">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Description <small class="text-muted">(optional)</small></label>
+          <input type="text" id="el-desc" class="form-control" maxlength="255">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Canvas background colour</label>
+          <input type="color" id="el-bg" class="form-control form-control-color">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-primary" id="btn-save-layout">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -115,11 +156,130 @@ document.querySelectorAll('.btn-delete-layout').forEach(btn => {
     if (!confirm(`Delete layout "${btn.dataset.layoutName}"?`)) return;
     const resp = await fetch(`/api/layouts/${btn.dataset.layoutId}`, { method: 'DELETE' });
     if (resp.ok) {
-      btn.closest('.col-md-4, .col-lg-3').remove();
+      btn.closest('.layout-col').remove();
       window.Leash.toast('Layout deleted', 'warning');
     }
   });
 });
+
+// ── Edit Layout ──────────────────────────────────────────────────────────
+const editModalEl = document.getElementById('editLayoutModal');
+const editModal = editModalEl ? new bootstrap.Modal(editModalEl) : null;
+
+document.querySelectorAll('.btn-edit-layout').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.getElementById('el-id').value   = btn.dataset.layoutId;
+    document.getElementById('el-name').value = btn.dataset.layoutName || '';
+    document.getElementById('el-desc').value = btn.dataset.layoutDescription || '';
+    document.getElementById('el-bg').value   = btn.dataset.layoutBg || '#0a1628';
+    editModal?.show();
+  });
+});
+
+document.getElementById('btn-save-layout')?.addEventListener('click', async () => {
+  const id   = document.getElementById('el-id').value;
+  const name = document.getElementById('el-name').value.trim();
+  const desc = document.getElementById('el-desc').value.trim();
+  const bg   = document.getElementById('el-bg').value;
+  if (!name) { window.Leash.toast('Name is required', 'warning'); return; }
+
+  const resp = await fetch(`/api/layouts/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, description: desc, bg_color: bg }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) {
+    window.Leash.toast(data.error || 'Failed to save', 'danger');
+    return;
+  }
+
+  // Patch the card in place — avoids a full page reload.
+  const col = document.querySelector(`.layout-col[data-layout-id="${id}"]`);
+  if (col) {
+    col.querySelector('.layout-name').textContent = data.name;
+    const bgBox = col.querySelector('.card-body');
+    if (bgBox) bgBox.style.background = data.bg_color;
+    const editBtn = col.querySelector('.btn-edit-layout');
+    if (editBtn) {
+      editBtn.dataset.layoutName = data.name;
+      editBtn.dataset.layoutDescription = data.description || '';
+      editBtn.dataset.layoutBg = data.bg_color;
+    }
+    const delBtn = col.querySelector('.btn-delete-layout');
+    if (delBtn) delBtn.dataset.layoutName = data.name;
+  }
+  editModal?.hide();
+  window.Leash.toast('Layout updated', 'success');
+});
+
+// ── Drag-to-reorder ──────────────────────────────────────────────────────
+const grid = document.getElementById('layouts-grid');
+if (grid) {
+  let dragged = null;
+
+  grid.addEventListener('dragstart', (e) => {
+    const col = e.target.closest('.layout-col');
+    if (!col) return;
+    dragged = col;
+    col.classList.add('layout-dragging');
+    // Required for Firefox to actually start the drag.
+    e.dataTransfer.effectAllowed = 'move';
+    try { e.dataTransfer.setData('text/plain', col.dataset.layoutId || ''); } catch (_) {}
+  });
+
+  grid.addEventListener('dragend', () => {
+    if (dragged) dragged.classList.remove('layout-dragging');
+    grid.querySelectorAll('.layout-col.layout-drop-target')
+        .forEach(el => el.classList.remove('layout-drop-target'));
+    dragged = null;
+  });
+
+  grid.addEventListener('dragover', (e) => {
+    if (!dragged) return;
+    const target = e.target.closest('.layout-col');
+    if (!target || target === dragged) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+
+    grid.querySelectorAll('.layout-col.layout-drop-target')
+        .forEach(el => el.classList.remove('layout-drop-target'));
+    target.classList.add('layout-drop-target');
+
+    // Insert before/after based on horizontal midpoint of the target.
+    const rect = target.getBoundingClientRect();
+    const before = (e.clientX - rect.left) < rect.width / 2;
+    if (before) {
+      grid.insertBefore(dragged, target);
+    } else {
+      grid.insertBefore(dragged, target.nextSibling);
+    }
+  });
+
+  grid.addEventListener('drop', async (e) => {
+    if (!dragged) return;
+    e.preventDefault();
+    grid.querySelectorAll('.layout-col.layout-drop-target')
+        .forEach(el => el.classList.remove('layout-drop-target'));
+
+    const order = Array.from(grid.querySelectorAll('.layout-col'))
+                       .map(el => Number(el.dataset.layoutId))
+                       .filter(Boolean);
+    try {
+      const resp = await fetch('/api/layouts/reorder', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order }),
+      });
+      if (!resp.ok) {
+        const data = await resp.json().catch(() => ({}));
+        window.Leash.toast(data.error || 'Failed to save order', 'danger');
+      }
+    } catch (err) {
+      window.Leash.toast('Failed to save order', 'danger');
+    }
+  });
+}
 
 </script>
 {% endblock %}

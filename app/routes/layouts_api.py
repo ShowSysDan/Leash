@@ -3,6 +3,7 @@ Layouts API
 
 GET    /api/layouts                         list all layouts
 POST   /api/layouts                         create layout
+PUT    /api/layouts/reorder                 set manual sort order from a list of ids
 GET    /api/layouts/<id>                    get layout with positions
 PUT    /api/layouts/<id>                    update name / description / bg_color
 DELETE /api/layouts/<id>                    delete layout
@@ -77,7 +78,7 @@ def _delete_layout_group(layout_name: str) -> None:
 
 @layouts_api_bp.route("/layouts", methods=["GET"])
 def list_layouts():
-    layouts = Layout.query.order_by(Layout.name).all()
+    layouts = Layout.query.order_by(Layout.sort_order, Layout.name).all()
     return jsonify([l.to_dict() for l in layouts])
 
 
@@ -92,12 +93,51 @@ def create_layout():
         return _err("bg_color must be a hex colour (e.g. #0a1628 or #abc)")
     desc = (body.get("description") or "").strip()[:MAX_DESCRIPTION]
 
-    layout = Layout(name=name, description=desc, bg_color=bg)
+    # Append new layouts to the end of the manual order.
+    max_order = db.session.query(db.func.max(Layout.sort_order)).scalar()
+    next_order = (max_order or 0) + 1
+
+    layout = Layout(name=name, description=desc, bg_color=bg, sort_order=next_order)
     db.session.add(layout)
     db.session.flush()
     _sync_layout_group(layout)
     db.session.commit()
     return jsonify(layout.to_dict(include_positions=True)), 201
+
+
+@layouts_api_bp.route("/layouts/reorder", methods=["PUT"])
+def reorder_layouts():
+    """Apply a new manual sort order from a list of layout ids.
+
+    Body: {"order": [id1, id2, ...]}  — leftmost id is first.
+    Ids not present keep their existing sort_order but get pushed past the
+    explicitly ordered ones so the supplied list always wins.
+    """
+    body = request.get_json(silent=True) or {}
+    order = body.get("order") or []
+    if not isinstance(order, list):
+        return _err("order must be a list of layout ids")
+    try:
+        ids = [int(x) for x in order]
+    except (TypeError, ValueError):
+        return _err("order entries must be integer layout ids")
+
+    layouts_by_id = {l.id: l for l in Layout.query.all()}
+    for position, lid in enumerate(ids, start=1):
+        layout = layouts_by_id.get(lid)
+        if layout is not None:
+            layout.sort_order = position
+
+    # Push any unspecified layouts to the end, preserving their relative order.
+    tail_start = len(ids) + 1
+    leftovers = [l for lid, l in layouts_by_id.items() if lid not in set(ids)]
+    leftovers.sort(key=lambda l: (l.sort_order, l.name))
+    for offset, layout in enumerate(leftovers):
+        layout.sort_order = tail_start + offset
+
+    db.session.commit()
+    layouts = Layout.query.order_by(Layout.sort_order, Layout.name).all()
+    return jsonify([l.to_dict() for l in layouts])
 
 
 @layouts_api_bp.route("/layouts/<int:layout_id>", methods=["GET"])

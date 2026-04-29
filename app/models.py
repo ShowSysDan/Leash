@@ -116,6 +116,9 @@ class Layout(db.Model):
     description = db.Column(db.String(255))
     # CSS colour for the canvas background
     bg_color = db.Column(db.String(20), default="#0a1628")
+    # Manual ordering on the layouts list page; lower = earlier.
+    # New layouts default to 0 and get sorted alphabetically as a tiebreaker.
+    sort_order = db.Column(db.Integer, default=0, nullable=False, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -134,6 +137,7 @@ class Layout(db.Model):
             "name": self.name,
             "description": self.description,
             "bg_color": self.bg_color,
+            "sort_order": self.sort_order,
             "receiver_count": len(self.positions),
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
