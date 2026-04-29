@@ -44,7 +44,7 @@ def groups():
 
 @main_bp.route("/layouts")
 def layouts():
-    all_layouts = Layout.query.order_by(Layout.name).all()
+    all_layouts = Layout.query.order_by(Layout.sort_order, Layout.name).all()
     return render_template("layouts.html", layouts=all_layouts)
 
 

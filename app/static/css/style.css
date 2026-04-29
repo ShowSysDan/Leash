@@ -237,6 +237,31 @@
   background-size: 5% 5%;
 }
 
+/* ── Layouts list page: drag-to-reorder ── */
+.layout-col {
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+.layout-col.layout-dragging {
+  opacity: 0.45;
+}
+.layout-col.layout-drop-target .layout-card {
+  outline: 2px dashed rgba(100, 180, 255, 0.8);
+  outline-offset: 3px;
+}
+.layout-card { cursor: default; }
+.layout-drag-handle {
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  color: rgba(255,255,255,0.55);
+  cursor: grab;
+  font-size: 1.1rem;
+  line-height: 1;
+  user-select: none;
+}
+.layout-drag-handle:hover { color: rgba(255,255,255,0.95); }
+.layout-col.layout-dragging .layout-drag-handle { cursor: grabbing; }
+
 /* ── Groups ── */
 .group-swatch {
   display: inline-block;
