@@ -161,6 +161,50 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  // ── Save snapshot of group ───────────────────────────────────────────────
+  document.querySelectorAll('.btn-snapshot-group').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.getElementById('sg-group-id').value = btn.dataset.groupId;
+      document.getElementById('sg-group-name').textContent = btn.dataset.groupName;
+      document.getElementById('sg-receiver-count').textContent = btn.dataset.receiverCount;
+      document.getElementById('sg-name').value = '';
+      document.getElementById('sg-desc').value = '';
+      new bootstrap.Modal(document.getElementById('snapshotGroupModal')).show();
+    });
+  });
+
+  document.getElementById('btn-save-group-snapshot')?.addEventListener('click', async () => {
+    const gid  = document.getElementById('sg-group-id')?.value;
+    const name = document.getElementById('sg-name')?.value?.trim();
+    const desc = document.getElementById('sg-desc')?.value?.trim();
+    if (!name) { window.Leash.toast('Name is required', 'warning'); return; }
+    if (!gid)  return;
+
+    const btn = document.getElementById('btn-save-group-snapshot');
+    btn.disabled = true;
+    try {
+      const resp = await fetch('/api/snapshots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          description: desc,
+          group_ids: [parseInt(gid)],
+        }),
+      });
+      const data = await resp.json();
+      if (resp.ok) {
+        window.Leash.toast(
+          `Snapshot "${name}" saved (${data.entry_count} receivers)`, 'success');
+        bootstrap.Modal.getInstance(document.getElementById('snapshotGroupModal'))?.hide();
+      } else {
+        window.Leash.toast(data.error || 'Capture failed', 'danger');
+      }
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
   document.getElementById('btn-save-members')?.addEventListener('click', async () => {
     const gid  = document.getElementById('mm-group-id')?.value;
     const checked = Array.from(document.querySelectorAll('.mm-recv-check:checked'))

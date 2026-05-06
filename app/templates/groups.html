@@ -90,10 +90,17 @@
           {% endif %}
         </div>
       </div>
-      <div class="card-footer py-2">
-        <button class="btn btn-xs btn-outline-secondary w-100 btn-manage-members"
+      <div class="card-footer py-2 d-flex gap-1">
+        <button class="btn btn-xs btn-outline-secondary flex-fill btn-manage-members"
                 data-group-id="{{ group.id }}" data-group-name="{{ group.name }}">
           <i class="bi bi-person-plus me-1"></i>Manage Members
+        </button>
+        <button class="btn btn-xs btn-outline-info flex-fill btn-snapshot-group"
+                data-group-id="{{ group.id }}"
+                data-group-name="{{ group.name }}"
+                data-receiver-count="{{ group.receivers|length }}"
+                {% if not group.receivers %}disabled title="Group has no members"{% else %}title="Save current sources of this group as a snapshot"{% endif %}>
+          <i class="bi bi-camera me-1"></i>Save Snapshot
         </button>
       </div>
     </div>
@@ -169,6 +176,42 @@
       <div class="modal-footer">
         <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
         <button class="btn btn-primary" id="btn-save-group">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Save Group Snapshot Modal -->
+<div class="modal fade" id="snapshotGroupModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-camera me-2"></i>Save Snapshot —
+          <span id="sg-group-name"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="sg-group-id">
+        <p class="text-muted small mb-3">
+          Captures the current NDI source of every receiver in this group
+          (<span id="sg-receiver-count">0</span> receivers).
+        </p>
+        <div class="mb-3">
+          <label class="form-label">Snapshot Name</label>
+          <input type="text" id="sg-name" class="form-control"
+                 placeholder="e.g. Lobby — Pre-show">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Description <small class="text-muted">(optional)</small></label>
+          <input type="text" id="sg-desc" class="form-control"
+                 placeholder="Default routing for the lobby group">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button class="btn btn-success" id="btn-save-group-snapshot">
+          <i class="bi bi-camera me-1"></i>Capture
+        </button>
       </div>
     </div>
   </div>

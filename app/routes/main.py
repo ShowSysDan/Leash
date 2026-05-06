@@ -60,8 +60,15 @@ def layout_view(layout_id: int):
 def snapshots():
     all_snaps = Snapshot.query.order_by(Snapshot.created_at.desc()).all()
     all_receivers = NDIReceiver.query.order_by(NDIReceiver.index).all()
+    all_groups = ReceiverGroup.query.order_by(ReceiverGroup.name).all()
     sources = _online_sources()
-    return render_template("snapshots.html", snapshots=all_snaps, receivers=all_receivers, sources=sources)
+    return render_template(
+        "snapshots.html",
+        snapshots=all_snaps,
+        receivers=all_receivers,
+        groups=all_groups,
+        sources=sources,
+    )
 
 
 @main_bp.route("/cameras")
