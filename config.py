@@ -96,11 +96,11 @@ class DevelopmentConfig(Config):
 class ProductionConfig(Config):
     DEBUG = False
     SQLALCHEMY_DATABASE_URI = os.environ.get("DATABASE_URL")
-    # Force HTTPS-only session cookies in production.  Set
-    # SESSION_COOKIE_SECURE=0 in the environment to opt out — only do that
-    # if the deployment really has plaintext HTTP somewhere downstream of
-    # TLS termination and you accept the risk of cookies on the wire.
-    SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "1") not in ("0", "false", "False", "")
+    # Default to plain-HTTP cookies so existing internal deployments keep
+    # working after upgrade.  Set SESSION_COOKIE_SECURE=1 in the environment
+    # the moment Leash is fronted by HTTPS — that prevents the session
+    # cookie from leaking on the wire.
+    SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "0") in ("1", "true", "True", "yes")
 
     @classmethod
     def init_app(cls, app):
