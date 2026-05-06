@@ -11,7 +11,7 @@ DELETE /api/schedules/<id>/enforcement end an active enforcement window early
 """
 from datetime import datetime, date as date_type
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 
 from app import db
 from app.models import PTZCamera, ScheduledRecall, Snapshot
@@ -75,6 +75,8 @@ def _validate_body(body: dict):
     stype = body.get("schedule_type", "ndi")
     if stype not in ("ndi", "camera"):
         return None, "schedule_type must be 'ndi' or 'camera'"
+    if stype == "camera" and not current_app.config.get("CAMERAS_ENABLED", False):
+        return None, "Camera support is disabled — only 'ndi' schedules can be created"
 
     base = {
         "name": name,

@@ -71,6 +71,14 @@ class Config:
     # Overridden at runtime by the DB setting AUTH_FORGOT_PASSWORD_URL.
     AUTH_FORGOT_PASSWORD_URL = os.environ.get("AUTH_FORGOT_PASSWORD_URL", "")
 
+    # Feature flag: PTZ camera support.
+    # The cameras feature is currently shelved — set to False so the UI nav,
+    # /cameras pages, /api/cameras endpoints, scanner camera detection, and
+    # camera-type schedules are all hidden / paused.  All the underlying code
+    # is left in place so the feature can be re-enabled later by flipping
+    # this flag (or setting CAMERAS_ENABLED=1 in the environment).
+    CAMERAS_ENABLED = os.environ.get("CAMERAS_ENABLED", "0") in ("1", "true", "True", "yes")
+
     # Session security
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"

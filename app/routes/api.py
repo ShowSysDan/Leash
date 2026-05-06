@@ -262,6 +262,7 @@ def scan():
         return _err("start must be ≤ end")
 
     cfg = current_app.config
+    cameras_enabled = bool(cfg.get("CAMERAS_ENABLED", False))
     decoders, cameras = run_async(scan_subnet(
         prefix=cfg["NDI_SUBNET_PREFIX"],
         port=cfg["NDI_DEVICE_PORT"],
@@ -270,6 +271,10 @@ def scan():
         start=start,
         end=end,
     ))
+    # Discard discovered cameras while the feature is paused so the table
+    # neither gets new rows nor has its existing rows toggled offline.
+    if not cameras_enabled:
+        cameras = []
 
     now = datetime.utcnow()
     recv_added, recv_updated = [], []
@@ -293,11 +298,14 @@ def scan():
         NDIReceiver.ip_last_octet.notin_(decoder_octets)
     ).update({"status": "offline", "updated_at": now}, synchronize_session=False)
 
-    # Mark cameras not found as offline
-    camera_octets = {c["ip_last_octet"] for c in cameras}
-    PTZCamera.query.filter(
-        PTZCamera.ip_last_octet.notin_(camera_octets)
-    ).update({"status": "offline", "updated_at": now}, synchronize_session=False)
+    if cameras_enabled:
+        # Only sweep camera state when the feature is on. Otherwise leave
+        # whatever rows pre-exist alone so flipping the flag back later
+        # doesn't surprise the operator with mass status changes.
+        camera_octets = {c["ip_last_octet"] for c in cameras}
+        PTZCamera.query.filter(
+            PTZCamera.ip_last_octet.notin_(camera_octets)
+        ).update({"status": "offline", "updated_at": now}, synchronize_session=False)
 
     db.session.commit()
 

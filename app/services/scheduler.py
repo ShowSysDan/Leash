@@ -240,6 +240,20 @@ def _check_schedules(app) -> None:
                 continue
 
             late_by = max(0, int(delta))
+            cameras_enabled = bool(app.config.get("CAMERAS_ENABLED", False))
+            if sched.schedule_type == "camera" and not cameras_enabled:
+                # Feature flag is off — record the skip on the schedule and
+                # move on so this row doesn't loop on every tick. We bump
+                # last_run to now so the catch-up window won't pick it up
+                # again until the next day.
+                logger.info(
+                    "Leash scheduler: camera schedule %r (id=%d) skipped — cameras disabled",
+                    sched.name, sched.id,
+                )
+                sched.last_run = datetime.utcnow()
+                sched.last_result = "SKIPPED: camera support is disabled"[:255]
+                db.session.commit()
+                continue
             logger.info(
                 "Leash scheduler: firing %s schedule %r (id=%d, mode=%s, late_by=%ds)",
                 sched.schedule_type, sched.name, sched.id, mode, late_by,

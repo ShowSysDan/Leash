@@ -38,6 +38,19 @@ logger = logging.getLogger(__name__)
 
 cameras_api_bp = Blueprint("cameras_api", __name__)
 
+
+@cameras_api_bp.before_request
+def _camera_feature_gate():
+    """Refuse every /api/cameras/* call when the feature flag is off.
+
+    The route handlers, models, and presets table are all left intact so the
+    feature can be brought back by flipping CAMERAS_ENABLED — this just makes
+    the blueprint inert at runtime.
+    """
+    if not current_app.config.get("CAMERAS_ENABLED", False):
+        return jsonify({"error": "Camera support is disabled"}), 503
+    return None
+
 # Settings groups accessible on cameras (subset of full birddog_client menu)
 CAMERA_SETTINGS_GROUPS = {
     "exposure":     ("get_exposure",      "set_exposure"),
