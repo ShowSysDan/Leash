@@ -249,15 +249,25 @@ def route_bulk():
     if not isinstance(body, list):
         return jsonify({"error": "Body must be a JSON array of route objects"}), 400
 
+    # Cap batch size so a single call can't tie up the worker for minutes.
+    MAX_BATCH = 500
+    if len(body) > MAX_BATCH:
+        return jsonify({
+            "error": f"Batch too large — max {MAX_BATCH} entries per call (got {len(body)})"
+        }), 413
+
     cfg = current_app.config
 
     # Resolve names first (sync, cheap)
     tasks = []
     errors = []
     for item in body:
+        if not isinstance(item, dict):
+            errors.append({"error": "entries must be objects", "item": item})
+            continue
         octet = str(item.get("ip_octet", "")).strip()
-        if not octet:
-            errors.append({"error": "ip_octet missing", "item": item})
+        if not octet.isdigit() or not (1 <= int(octet) <= 254):
+            errors.append({"error": "ip_octet must be an integer 1–254", "item": item})
             continue
         source_name, err = _resolve_source(item.get("source"))
         if err:
@@ -265,12 +275,20 @@ def route_bulk():
             continue
         tasks.append((octet, source_name))
 
+    concurrency = max(1, int(cfg.get("RECALL_CONCURRENCY", 10) or 10))
+
     async def _apply_all():
         prefix = cfg["NDI_SUBNET_PREFIX"]
+        sem = asyncio.Semaphore(concurrency)
 
         async def _one(octet, source_name):
             ip = f"{prefix}{octet}"
-            code, _ = await client_from_ip(ip, cfg).set_connect_to(source_name)
+            async with sem:
+                try:
+                    code, _ = await client_from_ip(ip, cfg).set_connect_to(source_name)
+                except Exception as exc:
+                    logger.warning("v1_route_bulk %s raised: %s", ip, exc)
+                    code = 0
             return {
                 "ip_octet": octet,
                 "ip_address": ip,

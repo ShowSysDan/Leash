@@ -1,12 +1,13 @@
 """
 Background scheduler for Leash.
 
-Two APScheduler jobs run in a single BackgroundScheduler thread:
+Four APScheduler jobs run in a single BackgroundScheduler thread:
 
-  leash_schedule_checker  (every 1 minute)
-      Looks for enabled ScheduledRecall entries whose day+time match the
-      current local time and fires them.  If a schedule is marked persistent,
-      sets enforcing_until = now + persist_minutes after the recall completes.
+  leash_schedule_checker  (cron, every minute at :15)
+      Looks for enabled ScheduledRecall entries whose day+time fall within
+      the catch-up window and fires them.  If a schedule is marked
+      persistent, sets enforcing_until = now + persist_minutes after the
+      recall completes.
 
   leash_enforcement       (every ENFORCEMENT_INTERVAL seconds, default 60)
       For each active enforcement window (enforcing_until > utcnow), polls
@@ -15,6 +16,22 @@ Two APScheduler jobs run in a single BackgroundScheduler thread:
       offline when the recall fired and have since come back online.
       Multiple concurrent windows on the same receiver → most-recently-fired
       schedule wins.
+
+Reliability features
+--------------------
+* The schedule checker uses a CronTrigger pinned to second :15 so ticks
+  always align with wall-clock minutes — an interval trigger drifted with
+  scheduler start time, which could push a fire one full minute past its
+  HH:MM.
+* Each tick fires schedules whose scheduled HH:MM is in the past but
+  within SCHEDULE_GRACE_SECONDS (default 5 min). Combined with
+  misfire_grace_time and coalesce=True, this means short scheduler
+  outages, slow recalls, or NTP corrections do not silently swallow a
+  scheduled fire — the next tick catches up.
+* A `last_run >= scheduled_today_utc` guard prevents the same schedule
+  from firing twice in the same minute when ticks coalesce.
+* On startup the checker runs once immediately so a restart that crosses
+  a scheduled HH:MM still recovers within the grace window.
 
 Concurrency gate: asyncio.Semaphore(RECALL_CONCURRENCY) inside every recall
 and correction pass so devices are batched rather than all hit at once.
@@ -28,28 +45,45 @@ import os
 from datetime import datetime, timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 
 logger = logging.getLogger(__name__)
 
 _scheduler: BackgroundScheduler | None = None
 
+# How far past a schedule's HH:MM we will still fire it as a missed-tick
+# recovery.  Anything older than this is treated as missed-forever so we
+# don't fire a 9am schedule at noon after a long outage.
+SCHEDULE_GRACE_SECONDS = 300
+
+# How much wall-clock slack APScheduler allows before declaring a tick
+# misfired.  Bigger than SCHEDULE_GRACE_SECONDS so misfired ticks still
+# get to run the catch-up logic instead of being dropped.
+APS_MISFIRE_GRACE = SCHEDULE_GRACE_SECONDS + 60
+
 
 def init_scheduler(app) -> BackgroundScheduler:
     """Create and start the background scheduler. Call once per process."""
     global _scheduler
+    if _scheduler is not None:
+        logger.warning("Leash scheduler: init_scheduler called twice — ignoring")
+        return _scheduler
+
     _scheduler = BackgroundScheduler(daemon=True)
 
+    # Cron trigger at :15 of every minute — wall-clock-aligned, which
+    # makes "schedule fired at HH:MM" comparisons deterministic.
     _scheduler.add_job(
         _check_schedules,
-        trigger="interval",
-        minutes=1,
+        trigger=CronTrigger(second=15),
         id="leash_schedule_checker",
         args=[app],
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=APS_MISFIRE_GRACE,
     )
 
-    interval = app.config.get("ENFORCEMENT_INTERVAL", 60)
+    interval = max(1, int(app.config.get("ENFORCEMENT_INTERVAL", 60) or 60))
     _scheduler.add_job(
         _enforce_persistent,
         trigger="interval",
@@ -58,9 +92,10 @@ def init_scheduler(app) -> BackgroundScheduler:
         args=[app],
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=interval * 2,
     )
 
-    source_interval = app.config.get("SOURCE_POLL_INTERVAL", 60)
+    source_interval = max(1, int(app.config.get("SOURCE_POLL_INTERVAL", 60) or 60))
     _scheduler.add_job(
         _sync_tractus_sources,
         trigger="interval",
@@ -69,9 +104,10 @@ def init_scheduler(app) -> BackgroundScheduler:
         args=[app],
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=source_interval * 2,
     )
 
-    recv_interval = app.config.get("RECEIVER_POLL_INTERVAL", 15)
+    recv_interval = max(1, int(app.config.get("RECEIVER_POLL_INTERVAL", 15) or 15))
     _scheduler.add_job(
         _poll_receiver_sources,
         trigger="interval",
@@ -80,12 +116,26 @@ def init_scheduler(app) -> BackgroundScheduler:
         args=[app],
         max_instances=1,
         coalesce=True,
+        misfire_grace_time=recv_interval * 4,
+    )
+
+    # One-shot startup catch-up so a deploy that crosses a scheduled HH:MM
+    # still fires within the grace window without waiting for the cron tick.
+    _scheduler.add_job(
+        _check_schedules,
+        trigger="date",
+        run_date=datetime.now() + timedelta(seconds=5),
+        id="leash_schedule_startup_catchup",
+        args=[app],
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=APS_MISFIRE_GRACE,
     )
 
     _scheduler.start()
     logger.info(
-        "Leash scheduler: started (pid=%d, enforcement=%ds, source_sync=%ds, recv_poll=%ds)",
-        os.getpid(), interval, source_interval, recv_interval,
+        "Leash scheduler: started (pid=%d, grace=%ds, enforcement=%ds, source_sync=%ds, recv_poll=%ds)",
+        os.getpid(), SCHEDULE_GRACE_SECONDS, interval, source_interval, recv_interval,
     )
 
     # atexit runs during graceful shutdown (gunicorn's default on SIGTERM),
@@ -107,26 +157,69 @@ def get_scheduler() -> BackgroundScheduler | None:
 # Job 1: fire scheduled recalls
 # ---------------------------------------------------------------------------
 
+def _parse_hhmm(value: str) -> tuple[int, int] | None:
+    """Return (hour, minute) for a stored HH:MM string, or None if malformed."""
+    if not value:
+        return None
+    parts = value.strip().split(":")
+    if len(parts) != 2:
+        return None
+    try:
+        hh, mm = int(parts[0]), int(parts[1])
+    except ValueError:
+        return None
+    if not (0 <= hh < 24 and 0 <= mm < 60):
+        return None
+    return hh, mm
+
+
 def _check_schedules(app) -> None:
-    """Called every minute. Fires enabled schedules whose time and date criteria match now."""
+    """Fire enabled schedules whose HH:MM is within the catch-up grace window.
+
+    Triggered by a CronTrigger at :15 of every minute and once on startup.
+    Each schedule fires at most once per scheduled minute thanks to the
+    last_run >= scheduled_utc guard.
+    """
     with app.app_context():
         from app import db
         from app.models import ScheduledRecall
 
         now_local = datetime.now()
+        now_utc = datetime.utcnow()
+        # Offset between the host's local clock and UTC, used to translate
+        # scheduled local HH:MM into a UTC-comparable timestamp without
+        # depending on the system tz being import-time-stable.
+        utc_offset = now_utc - now_local
+
         current_dow = str(now_local.weekday())   # "0"=Mon … "6"=Sun
-        current_hhmm = now_local.strftime("%H:%M")
         today = now_local.date()
+        grace = timedelta(seconds=SCHEDULE_GRACE_SECONDS)
 
         schedules = ScheduledRecall.query.filter_by(enabled=True).all()
         for sched in schedules:
-            # Guard against double-fire if app restarted within the same minute
-            if sched.last_run:
-                elapsed = (datetime.utcnow() - sched.last_run).total_seconds()
-                if elapsed < 55:
-                    continue
+            parsed = _parse_hhmm(sched.time_of_day)
+            if parsed is None:
+                logger.warning(
+                    "Leash scheduler: schedule %r (id=%d) has invalid time_of_day %r — skipping",
+                    sched.name, sched.id, sched.time_of_day,
+                )
+                continue
+            hh, mm = parsed
 
-            if current_hhmm != sched.time_of_day:
+            scheduled_local = now_local.replace(
+                hour=hh, minute=mm, second=0, microsecond=0,
+            )
+            delta = (now_local - scheduled_local).total_seconds()
+
+            # Future schedules (scheduled time later today) — wait.
+            # Schedules older than the grace window — treat as missed-forever.
+            if delta < 0 or delta > grace.total_seconds():
+                continue
+
+            # Don't fire if we already ran since the scheduled time.  Compare
+            # in UTC because last_run is recorded with utcnow().
+            scheduled_utc = scheduled_local + utc_offset
+            if sched.last_run and sched.last_run >= scheduled_utc:
                 continue
 
             mode = sched.schedule_mode or "weekly"
@@ -143,18 +236,37 @@ def _check_schedules(app) -> None:
                 days = [d.strip() for d in (sched.days_of_week or "").split(",")]
                 should_fire = current_dow in days
 
-            if should_fire:
-                logger.info(
-                    "Leash scheduler: firing %s schedule %r (id=%d, mode=%s)",
-                    sched.schedule_type, sched.name, sched.id, mode,
-                )
+            if not should_fire:
+                continue
+
+            late_by = max(0, int(delta))
+            logger.info(
+                "Leash scheduler: firing %s schedule %r (id=%d, mode=%s, late_by=%ds)",
+                sched.schedule_type, sched.name, sched.id, mode, late_by,
+            )
+            try:
                 if sched.schedule_type == "camera":
                     _do_camera_recall(app, sched.id)
                 else:
                     _do_recall(app, sched.id)
-                # Auto-disable one-time schedules after they fire
-                if mode == "once":
-                    sched.enabled = False
+            except Exception:
+                # Never let a single failing schedule abort the loop —
+                # other schedules in this tick must still get a chance.
+                logger.exception(
+                    "Leash scheduler: schedule %r (id=%d) raised — continuing",
+                    sched.name, sched.id,
+                )
+                try:
+                    db.session.rollback()
+                except Exception:
+                    logger.exception("Leash scheduler: rollback after fire failed")
+                continue
+            # Auto-disable one-time schedules after they fire
+            if mode == "once":
+                # Re-fetch in case the recall already mutated the row.
+                fresh = db.session.get(ScheduledRecall, sched.id)
+                if fresh is not None:
+                    fresh.enabled = False
                     db.session.commit()
 
 
@@ -197,8 +309,14 @@ def _do_recall(app, schedule_id: int) -> None:
             async def _one(entry):
                 async with sem:
                     recv = entry.receiver
-                    client = client_from_receiver(recv, cfg)
-                    code, _ = await client.set_connect_to(entry.source_name)
+                    try:
+                        client = client_from_receiver(recv, cfg)
+                        code, _ = await client.set_connect_to(entry.source_name)
+                    except Exception as exc:
+                        logger.warning(
+                            "Recall %r → %s raised: %s", sched.name, recv.ip_address, exc,
+                        )
+                        code = 0
                     return {
                         "receiver_id": recv.id,
                         "source_name": entry.source_name,
@@ -215,7 +333,7 @@ def _do_recall(app, schedule_id: int) -> None:
             except Exception as exc:
                 logger.exception("Leash scheduler: recall failed for schedule %r", sched.name)
                 sched.last_run = datetime.utcnow()
-                sched.last_result = f"ERROR: {exc}"
+                sched.last_result = f"ERROR: {exc}"[:255]
                 db.session.commit()
                 return
 
@@ -239,9 +357,9 @@ def _do_recall(app, schedule_id: int) -> None:
 
         sched.last_run = now
         if to_apply:
-            sched.last_result = f"OK: {len(ok_map)}/{len(to_apply)} succeeded"
+            sched.last_result = f"OK: {len(ok_map)}/{len(to_apply)} succeeded"[:255]
         else:
-            sched.last_result = "SKIPPED: no online receivers (enforcement will catch them)"
+            sched.last_result = "SKIPPED: no online receivers (enforcement will catch them)"[:255]
 
         # Arm enforcement window if persistent
         if sched.persistent and sched.persist_minutes:
@@ -291,7 +409,7 @@ def _do_camera_recall(app, schedule_id: int) -> None:
 
         if cam.status == "offline":
             sched.last_run = datetime.utcnow()
-            sched.last_result = "SKIPPED: camera offline"
+            sched.last_result = "SKIPPED: camera offline"[:255]
             db.session.commit()
             return
 
@@ -302,12 +420,14 @@ def _do_camera_recall(app, schedule_id: int) -> None:
         except Exception as exc:
             logger.exception("Camera recall failed for schedule %r", sched.name)
             sched.last_run = datetime.utcnow()
-            sched.last_result = f"ERROR: {exc}"
+            sched.last_result = f"ERROR: {exc}"[:255]
             db.session.commit()
             return
 
         sched.last_run = datetime.utcnow()
-        sched.last_result = f"{'OK' if ok else 'FAILED'}: preset {sched.preset_number} on {cam.display_name}"
+        sched.last_result = (
+            f"{'OK' if ok else 'FAILED'}: preset {sched.preset_number} on {cam.display_name}"
+        )[:255]
         db.session.commit()
         logger.info(
             "Camera recall %r: preset %d on %s → HTTP %d",
@@ -413,8 +533,15 @@ def _enforce_persistent(app) -> None:
 
             async def _one(recv, expected):
                 async with sem:
-                    client = client_from_receiver(recv, cfg)
-                    code, _ = await client.set_connect_to(expected)
+                    try:
+                        client = client_from_receiver(recv, cfg)
+                        code, _ = await client.set_connect_to(expected)
+                    except Exception as exc:
+                        logger.warning(
+                            "Enforcement %s → %r raised: %s",
+                            recv.ip_address, expected, exc,
+                        )
+                        code = 0
                     return {"receiver_id": recv.id, "ok": code == 200, "expected": expected}
 
             return await asyncio.gather(

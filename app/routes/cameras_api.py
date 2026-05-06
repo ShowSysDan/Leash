@@ -170,7 +170,13 @@ def ptz_command(camera_id: int):
     pan   = str(body.get("pan",  "STOP")).upper()
     tilt  = str(body.get("tilt", "STOP")).upper()
     zoom  = str(body.get("zoom", "STOP")).upper()
-    speed = int(body.get("speed", 5))
+    try:
+        speed = int(body.get("speed", 5))
+    except (TypeError, ValueError):
+        return _err("speed must be an integer 1–24")
+    # Clamp into the protocol's documented range so a hostile or buggy client
+    # cannot push the camera firmware into undefined behaviour.
+    speed = max(1, min(speed, 24))
 
     valid_pan  = {"LEFT", "RIGHT", "STOP"}
     valid_tilt = {"UP", "DOWN", "STOP"}

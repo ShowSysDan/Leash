@@ -114,8 +114,11 @@ def recall_snapshot(snap_id: int):
     async def _recall_all():
         async def _one(entry):
             recv = entry.receiver
-            client = client_from_receiver(recv, cfg)
-            code, _ = await client.set_connect_to(entry.source_name)
+            try:
+                client = client_from_receiver(recv, cfg)
+                code, _ = await client.set_connect_to(entry.source_name)
+            except Exception:
+                code = 0
             return {
                 "receiver_id": recv.id,
                 "source_name": entry.source_name,

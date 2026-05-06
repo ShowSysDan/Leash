@@ -142,8 +142,11 @@ def set_group_source(group_id: int):
 
     async def _apply_all():
         async def _one(recv):
-            client = client_from_receiver(recv, cfg)
-            code, data = await client.set_connect_to(source_name)
+            try:
+                client = client_from_receiver(recv, cfg)
+                code, data = await client.set_connect_to(source_name)
+            except Exception:
+                code = 0
             return {"receiver_id": recv.id, "status": code, "ok": code == 200}
 
         tasks = [asyncio.create_task(_one(r)) for r in targets]
