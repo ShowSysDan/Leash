@@ -1,9 +1,13 @@
-from flask import Blueprint, current_app, render_template
+from flask import Blueprint, abort, current_app, render_template
 
 from app.models import NDIReceiver, NDISource, PTZCamera, ReceiverGroup, Layout, Snapshot, ScheduledRecall
 from app.services.settings_service import SETTINGS_SCHEMA, all_settings_dicts
 
 main_bp = Blueprint("main", __name__)
+
+
+def _cameras_enabled() -> bool:
+    return bool(current_app.config.get("CAMERAS_ENABLED", False))
 
 
 def _online_sources():
@@ -73,12 +77,16 @@ def snapshots():
 
 @main_bp.route("/cameras")
 def cameras():
+    if not _cameras_enabled():
+        abort(404)
     all_cameras = PTZCamera.query.order_by(PTZCamera.index).all()
     return render_template("cameras.html", cameras=all_cameras)
 
 
 @main_bp.route("/cameras/<int:camera_id>")
 def camera_detail(camera_id: int):
+    if not _cameras_enabled():
+        abort(404)
     cam = PTZCamera.query.get_or_404(camera_id)
     preset_map = {p.preset_number: p.name for p in cam.presets}
     return render_template("camera_detail.html", camera=cam, preset_map=preset_map)
