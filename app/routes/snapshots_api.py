@@ -3,8 +3,11 @@ Snapshots API
 
 GET    /api/snapshots                       list snapshots
 POST   /api/snapshots                       capture current state
-                                            body: {"name":"...", "receiver_ids":[1,2]}
-                                            omit receiver_ids to capture all
+                                            body: {"name":"...",
+                                                   "receiver_ids":[1,2],
+                                                   "group_ids":[3,4]}
+                                            receiver_ids and group_ids are unioned;
+                                            omit both to capture every receiver.
 GET    /api/snapshots/<id>                  get snapshot with entries
 POST   /api/snapshots/<id>/recall           apply snapshot to devices concurrently
                                             body: {"receiver_ids":[1,2]}  (optional subset)
@@ -16,7 +19,7 @@ from datetime import datetime
 from flask import Blueprint, current_app, jsonify, request
 
 from app import db
-from app.models import NDIReceiver, Snapshot, SnapshotEntry
+from app.models import NDIReceiver, ReceiverGroup, Snapshot, SnapshotEntry
 from app.routes._helpers import err as _err, valid_name, MAX_DESCRIPTION
 from app.services.audit_log import device_error, snapshot_recalled, snapshot_source_changed
 from app.services.birddog_client import client_from_receiver, run_async
@@ -37,13 +40,26 @@ def create_snapshot():
     if not ok:
         return _err("name is required (max 100 characters)")
 
-    # Determine which receivers to include
-    ids = body.get("receiver_ids")
-    if ids:
-        receivers = NDIReceiver.query.filter(NDIReceiver.id.in_(ids)).all()
-        missing = set(ids) - {r.id for r in receivers}
-        if missing:
-            return _err(f"Unknown receiver ids: {sorted(missing)}")
+    # Determine which receivers to include. receiver_ids and group_ids are
+    # unioned; omit both to capture every receiver.
+    receiver_ids = list(body.get("receiver_ids") or [])
+    group_ids = list(body.get("group_ids") or [])
+
+    if group_ids:
+        groups = ReceiverGroup.query.filter(ReceiverGroup.id.in_(group_ids)).all()
+        missing_groups = set(group_ids) - {g.id for g in groups}
+        if missing_groups:
+            return _err(f"Unknown group ids: {sorted(missing_groups)}")
+        for g in groups:
+            receiver_ids.extend(r.id for r in g.receivers)
+
+    if receiver_ids or group_ids:
+        unique_ids = list(dict.fromkeys(receiver_ids))  # preserve order, dedupe
+        receivers = NDIReceiver.query.filter(NDIReceiver.id.in_(unique_ids)).all()
+        if body.get("receiver_ids"):
+            missing = set(body["receiver_ids"]) - {r.id for r in receivers}
+            if missing:
+                return _err(f"Unknown receiver ids: {sorted(missing)}")
     else:
         receivers = NDIReceiver.query.all()
 

@@ -16,6 +16,28 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  // Group chips: click → set selection to this group's members.
+  // Shift+click → additive (keep existing selection and add this group).
+  document.querySelectorAll('.cap-group-chip').forEach(chip => {
+    chip.addEventListener('click', (ev) => {
+      let memberIds;
+      try {
+        memberIds = new Set((JSON.parse(chip.dataset.receiverIds) || []).map(Number));
+      } catch (_) {
+        memberIds = new Set();
+      }
+      const additive = ev.shiftKey;
+      document.querySelectorAll('.cap-recv-check').forEach(cb => {
+        const inGroup = memberIds.has(parseInt(cb.value));
+        if (additive) {
+          if (inGroup) cb.checked = true;
+        } else {
+          cb.checked = inGroup;
+        }
+      });
+    });
+  });
+
   // ── Capture ──────────────────────────────────────────────────────────────
   document.getElementById('btn-capture')?.addEventListener('click', async () => {
     const name = document.getElementById('cap-name')?.value?.trim();

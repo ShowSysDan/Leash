@@ -92,6 +92,26 @@
           </div>
         </div>
         <hr>
+        {% if groups %}
+        <div class="mb-3">
+          <div class="small text-muted mb-1">Quick select by group</div>
+          <div class="d-flex flex-wrap gap-1" id="cap-group-chips">
+            {% for g in groups %}
+            <button type="button"
+                    class="btn btn-xs cap-group-chip"
+                    data-group-id="{{ g.id }}"
+                    data-receiver-ids="{{ g.receivers | map(attribute='id') | list | tojson }}"
+                    style="background:{{ g.color }}22; border:1px solid {{ g.color }}; color:#eee;"
+                    title="Select only this group's receivers">
+              <span class="group-swatch me-1" style="background:{{ g.color }}; width:8px; height:8px;"></span>
+              {{ g.name }}
+              <span class="badge bg-secondary ms-1">{{ g.receivers|length }}</span>
+            </button>
+            {% endfor %}
+          </div>
+          <small class="text-muted">Click a group to replace selection with its members. Hold Shift to add.</small>
+        </div>
+        {% endif %}
         <div class="d-flex align-items-center mb-2">
           <strong class="small">Receivers to include</strong>
           <div class="ms-auto d-flex gap-2">
