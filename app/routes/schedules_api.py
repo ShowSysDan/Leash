@@ -88,27 +88,42 @@ def _validate_body(body: dict):
     }
 
     if stype == "camera":
-        cam_id = body.get("camera_id")
-        preset_num = body.get("preset_number")
-        if cam_id is None:
+        cam_id_raw = body.get("camera_id")
+        preset_raw = body.get("preset_number")
+        if cam_id_raw is None:
             return None, "camera_id is required for camera schedules"
-        if not PTZCamera.query.get(int(cam_id)):
+        try:
+            cam_id = int(cam_id_raw)
+        except (TypeError, ValueError):
+            return None, "camera_id must be an integer"
+        if not PTZCamera.query.get(cam_id):
             return None, f"Camera {cam_id} not found"
-        if preset_num is None or not (0 <= int(preset_num) <= 99):
+        try:
+            preset_num = int(preset_raw) if preset_raw is not None else None
+        except (TypeError, ValueError):
+            return None, "preset_number must be an integer 0–99"
+        if preset_num is None or not (0 <= preset_num <= 99):
             return None, "preset_number must be 0–99"
-        return {**base, "camera_id": int(cam_id), "preset_number": int(preset_num)}, None
+        return {**base, "camera_id": cam_id, "preset_number": preset_num}, None
     else:
-        snap_id = body.get("snapshot_id")
-        if snap_id is None:
+        snap_id_raw = body.get("snapshot_id")
+        if snap_id_raw is None:
             return None, "snapshot_id is required for ndi schedules"
-        if not Snapshot.query.get(int(snap_id)):
+        try:
+            snap_id = int(snap_id_raw)
+        except (TypeError, ValueError):
+            return None, "snapshot_id must be an integer"
+        if not Snapshot.query.get(snap_id):
             return None, f"Snapshot {snap_id} not found"
-        persist_minutes = int(body.get("persist_minutes", 60))
+        try:
+            persist_minutes = int(body.get("persist_minutes", 60))
+        except (TypeError, ValueError):
+            return None, "persist_minutes must be an integer"
         if persist_minutes < 1 or persist_minutes > 1440:
             return None, "persist_minutes must be between 1 and 1440"
         return {
             **base,
-            "snapshot_id": int(snap_id),
+            "snapshot_id": snap_id,
             "persistent": bool(body.get("persistent", False)),
             "persist_minutes": persist_minutes,
         }, None

@@ -33,12 +33,19 @@ layouts_api_bp = Blueprint("layouts_api", __name__)
 _DEFAULT_BG = "#0a1628"
 
 
-def _sync_layout_group(layout: Layout, *, previous_name: str | None = None) -> None:
+_AUTO_DESC_PREFIX = "Auto-generated from layout"
+
+
+def _sync_layout_group(layout: Layout, *, previous_name: str | None = None) -> str | None:
     """Keep a ReceiverGroup in lockstep with this layout.
 
     Membership = the layout's positioned receivers. Name follows the layout.
     Called from every endpoint that mutates a layout's identity or membership.
     Caller is responsible for db.session.commit().
+
+    Returns None on success or an error string when a non-auto group already
+    owns the target name.  Callers should propagate that as a 409 rather
+    than letting the unique-constraint violation blow up the commit.
     """
     target_name = layout.name
     receiver_ids = [p.receiver_id for p in layout.positions]
@@ -52,27 +59,46 @@ def _sync_layout_group(layout: Layout, *, previous_name: str | None = None) -> N
     group = None
     if previous_name and previous_name != target_name:
         group = ReceiverGroup.query.filter_by(name=previous_name).first()
+        # A user-created group might already own the target name — refuse to
+        # clobber it instead of letting the unique-name constraint blow up
+        # the whole transaction.
+        clash = ReceiverGroup.query.filter_by(name=target_name).first()
+        if clash is not None and clash is not group and not _is_auto_group(clash):
+            return (
+                f"A non-auto group named {target_name!r} already exists — "
+                "rename or remove it before reusing the name."
+            )
     if group is None:
         group = ReceiverGroup.query.filter_by(name=target_name).first()
 
     if group is None:
         group = ReceiverGroup(
             name=target_name,
-            description=f"Auto-generated from layout: {target_name}",
+            description=f"{_AUTO_DESC_PREFIX}: {target_name}",
         )
         db.session.add(group)
     else:
         group.name = target_name
-        if not group.description or group.description.startswith("Auto-generated from layout"):
-            group.description = f"Auto-generated from layout: {target_name}"
+        if not group.description or group.description.startswith(_AUTO_DESC_PREFIX):
+            group.description = f"{_AUTO_DESC_PREFIX}: {target_name}"
 
     group.receivers = receivers
+    return None
+
+
+def _is_auto_group(group: ReceiverGroup) -> bool:
+    return bool(group.description and group.description.startswith(_AUTO_DESC_PREFIX))
 
 
 def _delete_layout_group(layout_name: str) -> None:
-    """Remove the auto-generated group when a layout is deleted."""
+    """Remove the auto-generated group when a layout is deleted.
+
+    Only deletes groups that look auto-generated (description starts with the
+    auto prefix) so a manually-created group with the same name as a deleted
+    layout isn't silently destroyed alongside it.
+    """
     group = ReceiverGroup.query.filter_by(name=layout_name).first()
-    if group:
+    if group and _is_auto_group(group):
         db.session.delete(group)
 
 
@@ -170,7 +196,10 @@ def update_layout(layout_id: int):
 
     layout.updated_at = datetime.utcnow()
     if name_changed:
-        _sync_layout_group(layout, previous_name=previous_name)
+        clash = _sync_layout_group(layout, previous_name=previous_name)
+        if clash:
+            db.session.rollback()
+            return _err(clash, 409)
     db.session.commit()
     return jsonify(layout.to_dict())
 

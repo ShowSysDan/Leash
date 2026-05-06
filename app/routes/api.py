@@ -248,8 +248,18 @@ def scan():
     Both types are upserted; known devices not found are marked offline.
     """
     body = request.get_json(silent=True) or {}
-    start = int(body.get("start", 1))
-    end = int(body.get("end", 254))
+    try:
+        start = int(body.get("start", 1))
+        end = int(body.get("end", 254))
+    except (TypeError, ValueError):
+        return _err("start and end must be integers")
+
+    # Clamp to the legal IPv4 last-octet range and reject inverted bounds so
+    # a hostile or buggy client cannot ask us to fire 4-billion HTTP probes.
+    start = max(1, min(start, 254))
+    end = max(1, min(end, 254))
+    if start > end:
+        return _err("start must be ≤ end")
 
     cfg = current_app.config
     decoders, cameras = run_async(scan_subnet(
@@ -379,11 +389,15 @@ def bulk_reboot():
         ) as session:
             async def _one(recv):
                 async with sem:
-                    client = BirdDogClient(
-                        recv.ip_address, port=port, password=password,
-                        timeout=timeout, session=session,
-                    )
-                    code, _ = await client.reboot()
+                    try:
+                        client = BirdDogClient(
+                            recv.ip_address, port=port, password=password,
+                            timeout=timeout, session=session,
+                        )
+                        code, _ = await client.reboot()
+                    except Exception as exc:
+                        logger.warning("Bulk reboot %s raised: %s", recv.ip_address, exc)
+                        code = 0
                     return {"id": recv.id, "ip": recv.ip_address,
                             "name": recv.display_name, "ok": code == 200, "status": code}
             return await asyncio.gather(*[_one(r) for r in receivers], return_exceptions=False)

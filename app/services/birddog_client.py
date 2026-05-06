@@ -457,19 +457,30 @@ def client_from_camera(camera, app_config) -> "BirdDogClient":
 # ---------------------------------------------------------------------------
 
 def run_async(coro):
-    """Run an async coroutine from synchronous Flask code."""
+    """Run an async coroutine from synchronous Flask code.
+
+    Always uses a fresh event loop via ``asyncio.run`` so the loop, its
+    selector, and any internal pipe FDs are torn down on every call.
+    Earlier revisions called ``asyncio.get_event_loop()`` and reused the
+    per-thread loop, which kept the loop alive for the lifetime of the
+    gunicorn worker thread and (with --threads N) leaked N event loops
+    plus all the sockets they had ever held.
+
+    If the caller is already inside a running loop (rare — only happens
+    under unusual WSGI wrappers), fall back to a one-shot worker thread.
+    """
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # Inside an already-running loop (e.g. some WSGI wrappers) —
-            # create a new loop in a thread instead.
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(asyncio.run, coro)
-                return future.result()
-        return loop.run_until_complete(coro)
+        asyncio.get_running_loop()
     except RuntimeError:
+        # No running loop on this thread → safe to drive a new one ourselves.
         return asyncio.run(coro)
+
+    # Already inside a loop — run the coroutine in a worker thread so we
+    # don't try to nest event loops.  ThreadPoolExecutor is created and
+    # joined inside this call, so no leak.
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coro).result()
 
 
 def _bulk_timeout(timeout: int) -> aiohttp.ClientTimeout:
@@ -505,6 +516,8 @@ async def bulk_fetch_source(receivers: list, config: dict) -> list[dict]:
     making it suitable for frequent enforcement checks.
     Returns list of {"id", "online", "current_source"} dicts.
     All requests share one aiohttp session (and one connection pool) for reuse.
+    Exceptions inside a single receiver's coroutine are converted to an
+    offline result so one bad device cannot abort the whole batch.
     """
     prefix = config.get("NDI_SUBNET_PREFIX", "10.1.248.")
     port = config.get("NDI_DEVICE_PORT", 8080)
@@ -521,9 +534,13 @@ async def bulk_fetch_source(receivers: list, config: dict) -> list[dict]:
         async def _one(recv):
             async with sem:
                 ip = f"{prefix}{recv['ip_last_octet']}"
-                client = BirdDogClient(ip, port=port, password=password,
-                                       timeout=timeout, session=session)
-                code, data = await client.get_connect_to()
+                try:
+                    client = BirdDogClient(ip, port=port, password=password,
+                                           timeout=timeout, session=session)
+                    code, data = await client.get_connect_to()
+                except Exception as exc:
+                    logger.warning("bulk_fetch_source %s raised: %s", ip, exc)
+                    code, data = 0, None
                 online = code == 200
                 current = None
                 if online and isinstance(data, dict):
@@ -540,6 +557,8 @@ async def bulk_fetch_status(receivers: list, config: dict) -> list[dict]:
     All requests share one aiohttp session and connection pool.
     Concurrency is bounded by a semaphore (RECALL_CONCURRENCY) to prevent
     flooding the switch when called on 200+ receivers simultaneously.
+    Exceptions inside a single receiver's coroutine are converted to an
+    offline result so one bad device cannot abort the whole batch.
     """
     prefix = config.get("NDI_SUBNET_PREFIX", "10.1.248.")
     port = config.get("NDI_DEVICE_PORT", 8080)
@@ -557,9 +576,16 @@ async def bulk_fetch_status(receivers: list, config: dict) -> list[dict]:
         async def _one(recv):
             async with sem:
                 ip = f"{prefix}{recv['ip_last_octet']}"
-                client = BirdDogClient(ip, port=port, password=password,
-                                       timeout=timeout, session=session)
-                status = await client.fetch_status()
+                try:
+                    client = BirdDogClient(ip, port=port, password=password,
+                                           timeout=timeout, session=session)
+                    status = await client.fetch_status()
+                except Exception as exc:
+                    logger.warning("bulk_fetch_status %s raised: %s", ip, exc)
+                    status = {
+                        "online": False, "hostname": None, "current_source": None,
+                        "firmware_version": None, "serial_number": None, "video_format": None,
+                    }
                 status["id"] = recv["id"]
                 return status
 

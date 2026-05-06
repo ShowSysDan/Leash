@@ -42,6 +42,13 @@ logger = logging.getLogger(__name__)
 _PUBLIC_ENDPOINTS = frozenset({"auth.login", "auth.login_post", "auth.logout", "static"})
 _ALLOWED_ROLES = frozenset({"admin", "staff"})
 
+# State-changing methods that must carry a non-simple Content-Type so the
+# browser is forced into a CORS preflight (which we don't allow) before the
+# request can be sent cross-origin. Blocks form-submission CSRF against the
+# session-authenticated /api/* endpoints.
+_STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+_SAFE_API_CONTENT_TYPES = ("application/json",)
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -165,15 +172,37 @@ def _register_before_request(app) -> None:
 
     @app.before_request
     def _csrf_check():
-        # JSON API endpoints are same-origin-safe via Content-Type preflight;
-        # only the login HTML form needs an explicit token.
-        if request.method != "POST" or (request.endpoint or "") != "auth.login_post":
+        # 1) Login form: explicit double-submit token check.
+        if request.method == "POST" and (request.endpoint or "") == "auth.login_post":
+            token = request.form.get("csrf_token", "")
+            expected = session.get("_csrf_token", "")
+            if not expected or not secrets.compare_digest(token, expected):
+                flash("Invalid form token — please try again.", "danger")
+                return redirect(url_for("auth.login"))
             return None
-        token = request.form.get("csrf_token", "")
-        expected = session.get("_csrf_token", "")
-        if not expected or not secrets.compare_digest(token, expected):
-            flash("Invalid form token — please try again.", "danger")
-            return redirect(url_for("auth.login"))
+
+        # 2) Session-authenticated /api/* endpoints: refuse state-changing
+        # requests that don't declare Content-Type: application/json. Simple
+        # cross-origin form submissions can only set application/x-www-form-
+        # urlencoded, multipart/form-data, or text/plain, so requiring JSON
+        # forces a CORS preflight (which we never answer) before the browser
+        # will dispatch a hostile request.  /api/v1/* has its own API-key
+        # auth and no session cookie, so it is exempt.
+        if request.method not in _STATE_CHANGING_METHODS:
+            return None
+        path = request.path or ""
+        if not path.startswith("/api/") or path.startswith("/api/v1/"):
+            return None
+        # No body at all → safe for CSRF since browsers always send a
+        # Content-Type when there is one. Skip the check so endpoints like
+        # bodyless DELETE keep working from in-app fetch().
+        ctype = (request.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+        if not ctype and request.content_length in (None, 0):
+            return None
+        if not any(ctype == ok for ok in _SAFE_API_CONTENT_TYPES):
+            return jsonify({
+                "error": "Refusing state-changing request: Content-Type must be application/json",
+            }), 415
         return None
 
     @app.context_processor
