@@ -105,6 +105,14 @@ def create_app(config_name: str = "default") -> Flask:
     migrate.init_app(app, db)
     limiter.init_app(app)
 
+    # Server-side sessions backed by the shared <AUTH_DB_SCHEMA>.app_sessions
+    # table. The cookie holds only a random sid, so two apps pointed at the
+    # same Postgres + auth schema share login state. Skipped automatically in
+    # dev (no AUTH_DB_SCHEMA / SQLite) or when DISABLE_DB_SESSIONS=1.
+    from app.services.session_service import init_db_sessions
+    with app.app_context():
+        init_db_sessions(app, db)
+
     # Belt-and-suspenders: if a request raises, roll back any pending SA state
     # so the next request starts on a clean session. Flask-SQLAlchemy already
     # calls session.remove() on teardown, but an explicit rollback on error

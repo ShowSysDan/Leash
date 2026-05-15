@@ -35,6 +35,7 @@ from app.services.auth_service import (
     get_user_by_username,
     refresh_user_role,
 )
+from app.services.session_service import rotate_sid
 
 auth_bp = Blueprint("auth", __name__)
 logger = logging.getLogger(__name__)
@@ -74,7 +75,11 @@ def _redirect_to_login():
 
 
 def _populate_session(user: dict) -> None:
-    session.clear()  # session fixation protection
+    session.clear()  # session fixation protection (drops pre-auth state)
+    # Under DB-backed sessions, also mint a fresh sid so the post-auth
+    # cookie value differs from anything the client carried before login.
+    # No-op under Flask's default signed-cookie sessions.
+    rotate_sid(session)
     session.permanent = True
     session["logged_in"] = True
     session["user_id"] = user["id"]

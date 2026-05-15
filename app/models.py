@@ -393,6 +393,23 @@ class ScheduledRecall(db.Model):
         delta = self.enforcing_until - datetime.utcnow()
         return max(0, int(delta.total_seconds() // 60))
 
+    def is_past(self) -> bool:
+        """Past = one-time/weekly-until schedule whose date is before today AND
+        which has actually run. A schedule whose fire date passed while the
+        server was offline (no last_run) stays in the active list so an
+        operator can notice and decide what to do."""
+        if not self.last_run:
+            return False
+        mode = self.schedule_mode or "weekly"
+        if mode == "weekly":
+            return False
+        today = datetime.now().date()
+        if mode == "once":
+            return self.run_date is not None and self.run_date < today
+        if mode == "weekly_until":
+            return self.end_date is not None and self.end_date < today
+        return False
+
     def to_dict(self) -> dict:
         d: dict = {
             "id": self.id,
@@ -408,6 +425,7 @@ class ScheduledRecall(db.Model):
             "last_run": self.last_run.isoformat() if self.last_run else None,
             "last_result": self.last_result,
             "created_at": self.created_at.isoformat() if self.created_at else None,
+            "is_past": self.is_past(),
         }
         if self.schedule_type == "camera":
             d["camera_id"] = self.camera_id

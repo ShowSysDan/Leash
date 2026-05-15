@@ -1,15 +1,18 @@
 """
 Schedules API
 
-GET    /api/schedules                  list all
-POST   /api/schedules                  create
-GET    /api/schedules/<id>             get one
-PUT    /api/schedules/<id>             update
-DELETE /api/schedules/<id>             delete
-PATCH  /api/schedules/<id>/toggle      flip enabled flag
-DELETE /api/schedules/<id>/enforcement end an active enforcement window early
+GET    /api/schedules                       list all
+POST   /api/schedules                       create
+GET    /api/schedules/<id>                  get one
+PUT    /api/schedules/<id>                  update
+DELETE /api/schedules/<id>                  delete
+PATCH  /api/schedules/<id>/toggle           flip enabled flag
+DELETE /api/schedules/<id>/enforcement      end an active enforcement window early
+POST   /api/schedules/<id>/duplicate        clone + (optionally) re-time
+PATCH  /api/schedules/<id>/reschedule       drag-to-move handler (date and/or time)
+GET    /api/schedules/occurrences           expand schedules into per-date events
 """
-from datetime import datetime, date as date_type
+from datetime import datetime, date as date_type, timedelta
 
 from flask import Blueprint, current_app, jsonify, request
 
@@ -240,3 +243,113 @@ def duplicate_schedule(sched_id: int):
     db.session.add(clone)
     db.session.commit()
     return jsonify(clone.to_dict()), 201
+
+
+# ── Calendar helpers ──────────────────────────────────────────────────────
+
+
+def _expand_schedule(sched: ScheduledRecall, start: date_type, end: date_type):
+    """Yield occurrence dates for a schedule between start and end (inclusive)."""
+    mode = sched.schedule_mode or "weekly"
+
+    if mode == "once":
+        if sched.run_date and start <= sched.run_date <= end:
+            yield sched.run_date
+        return
+
+    days = {int(d) for d in (sched.days_of_week or "").split(",") if d.strip().isdigit()}
+    if not days:
+        return
+
+    cutoff = sched.end_date if mode == "weekly_until" else None
+    cur = start
+    one_day = timedelta(days=1)
+    while cur <= end:
+        if cutoff and cur > cutoff:
+            break
+        if cur.weekday() in days:
+            yield cur
+        cur += one_day
+
+
+@schedules_api_bp.route("/schedules/occurrences", methods=["GET"])
+def list_occurrences():
+    """Expand all schedules into individual date occurrences in a range.
+
+    Used by the calendar views. Each occurrence carries enough metadata for
+    the client to render a pill and decide whether drag is allowed.
+    """
+    start_str = request.args.get("start", "")
+    end_str = request.args.get("end", "")
+    start, err = _parse_date(start_str)
+    if err:
+        return _err(f"start: {err}")
+    end, err = _parse_date(end_str)
+    if err:
+        return _err(f"end: {err}")
+    if end < start:
+        return _err("end must be on or after start")
+    if (end - start).days > 366:
+        return _err("range cannot exceed 366 days")
+
+    today = datetime.now().date()
+    cameras_enabled = bool(current_app.config.get("CAMERAS_ENABLED", False))
+
+    occurrences = []
+    for sched in ScheduledRecall.query.all():
+        if sched.schedule_type == "camera" and not cameras_enabled:
+            continue
+        for occ_date in _expand_schedule(sched, start, end):
+            occurrences.append({
+                "schedule_id": sched.id,
+                "name": sched.name,
+                "date": occ_date.isoformat(),
+                "time_of_day": sched.time_of_day,
+                "schedule_mode": sched.schedule_mode or "weekly",
+                "schedule_type": sched.schedule_type,
+                "enabled": sched.enabled,
+                "is_past": occ_date < today,
+                "snapshot_name": sched.snapshot.name if sched.schedule_type == "ndi" and sched.snapshot else None,
+                "camera_name": sched.camera.display_name if sched.schedule_type == "camera" and sched.camera else None,
+                "preset_number": sched.preset_number,
+                "persistent": bool(sched.persistent) if sched.schedule_type == "ndi" else False,
+            })
+    return jsonify(occurrences)
+
+
+@schedules_api_bp.route("/schedules/<int:sched_id>/reschedule", methods=["PATCH"])
+def reschedule(sched_id: int):
+    """Drag-to-move handler for the calendar views.
+
+    For "once" schedules, accepts a new run_date and/or time_of_day.
+    For "weekly" / "weekly_until" schedules, accepts time_of_day only —
+    changing days requires the full Edit modal (clearer UX).
+    """
+    sched = ScheduledRecall.query.get_or_404(sched_id)
+    body = request.get_json(silent=True) or {}
+
+    new_date_raw = body.get("run_date")
+    new_time_raw = body.get("time_of_day")
+
+    if not new_date_raw and not new_time_raw:
+        return _err("run_date or time_of_day required")
+
+    mode = sched.schedule_mode or "weekly"
+    if new_date_raw and mode != "once":
+        return _err("Only one-time schedules can be moved to a different date — use Edit for recurring schedules")
+
+    if new_date_raw:
+        new_date, derr = _parse_date(new_date_raw)
+        if derr:
+            return _err(f"run_date: {derr}")
+        sched.run_date = new_date
+
+    if new_time_raw:
+        time_str = str(new_time_raw).strip()
+        if not valid_time_of_day(time_str):
+            return _err("time_of_day must be HH:MM (24-hour)")
+        sched.time_of_day = time_str
+
+    sched.updated_at = datetime.utcnow()
+    db.session.commit()
+    return jsonify(sched.to_dict())
