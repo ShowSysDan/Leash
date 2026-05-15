@@ -83,6 +83,10 @@ class Config:
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     PERMANENT_SESSION_LIFETIME = timedelta(hours=12)
+    # When sharing DB-backed sessions with a sibling app on a different
+    # subdomain, set this to a common parent (e.g. ".example.com") so the
+    # browser sends the cookie to both. Leave unset for same-host setups.
+    SESSION_COOKIE_DOMAIN = os.environ.get("SESSION_COOKIE_DOMAIN") or None
 
 
 class DevelopmentConfig(Config):
