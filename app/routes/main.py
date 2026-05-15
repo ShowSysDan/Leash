@@ -95,11 +95,19 @@ def camera_detail(camera_id: int):
 @main_bp.route("/schedules")
 def schedules():
     all_schedules = ScheduledRecall.query.order_by(ScheduledRecall.time_of_day).all()
+    active = [s for s in all_schedules if not s.is_past()]
+    # Most-recently-elapsed first so the latest history is at the top.
+    past = sorted(
+        (s for s in all_schedules if s.is_past()),
+        key=lambda s: (s.run_date or s.end_date or s.last_run.date(), s.time_of_day),
+        reverse=True,
+    )
     all_snapshots = Snapshot.query.order_by(Snapshot.name).all()
     all_cameras = PTZCamera.query.order_by(PTZCamera.index).all()
     return render_template(
         "schedules.html",
-        schedules=all_schedules,
+        schedules=active,
+        past_schedules=past,
         snapshots=all_snapshots,
         cameras=all_cameras,
         concurrency=current_app.config.get("RECALL_CONCURRENCY", 10),

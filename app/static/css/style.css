@@ -301,3 +301,176 @@
 .receiver-card.reloading {
   animation: pulse-border 1s infinite;
 }
+
+/* ── Past-schedule rows ───────────────────────────────────────────────── */
+.past-schedule-row {
+  background-color: rgba(255, 255, 255, 0.02);
+}
+
+/* ── Month calendar view ──────────────────────────────────────────────── */
+.month-grid {
+  border: 1px solid #444;
+  border-radius: 0.375rem;
+  overflow: hidden;
+  background: #1e1e1e;
+}
+.month-grid-head,
+.month-grid-body {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+}
+.month-grid-head-cell {
+  text-align: center;
+  padding: 6px 4px;
+  background: #2a2a2a;
+  color: #bbb;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid #444;
+}
+.month-cell {
+  min-height: 110px;
+  padding: 4px;
+  border-right: 1px solid #333;
+  border-bottom: 1px solid #333;
+  cursor: pointer;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  transition: background-color 0.1s;
+}
+.month-cell:nth-child(7n) { border-right: none; }
+.month-cell.out-of-month { background: #181818; }
+.month-cell.out-of-month .month-cell-num { color: #555; }
+.month-cell.today { background: rgba(13, 110, 253, 0.08); }
+.month-cell.today .month-cell-num {
+  background: #0d6efd;
+  color: #fff;
+  border-radius: 999px;
+  display: inline-block;
+  min-width: 22px;
+  text-align: center;
+  padding: 0 4px;
+}
+.month-cell.drag-over { background: rgba(25, 135, 84, 0.15); outline: 1px dashed #19875455; }
+.month-cell:hover:not(.out-of-month) { background: rgba(255,255,255,0.03); }
+.month-cell-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+.month-cell-num {
+  font-size: 0.85rem;
+  color: #ccc;
+  font-weight: 600;
+}
+.month-cell-events {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+.month-event {
+  font-size: 0.75rem;
+  background: #0d6efd;
+  color: #fff;
+  border-radius: 3px;
+  padding: 1px 5px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-left: 3px solid #0a58ca;
+}
+.month-event:hover { filter: brightness(1.15); }
+.month-event.draggable { cursor: grab; }
+.month-event.draggable:active { cursor: grabbing; }
+.month-event.persistent { background: #198754; border-left-color: #146c43; }
+.month-event.disabled { background: #555; border-left-color: #444; opacity: 0.6; }
+.month-event.past { opacity: 0.5; background: #6c757d; border-left-color: #495057; }
+.month-event-time {
+  font-family: var(--bs-font-monospace, monospace);
+  font-weight: 600;
+  margin-right: 2px;
+}
+
+/* ── Week calendar view ───────────────────────────────────────────────── */
+.week-grid {
+  border: 1px solid #444;
+  border-radius: 0.375rem;
+  overflow: hidden;
+  background: #1e1e1e;
+}
+.week-grid-head {
+  display: grid;
+  grid-template-columns: 56px repeat(7, 1fr);
+  background: #2a2a2a;
+  border-bottom: 1px solid #444;
+}
+.week-grid-head-cell {
+  text-align: center;
+  padding: 6px 4px;
+  border-left: 1px solid #333;
+  color: #bbb;
+  font-size: 0.8rem;
+}
+.week-grid-head-cell.today { background: rgba(13, 110, 253, 0.15); color: #fff; }
+.week-dow {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.7rem;
+  color: #888;
+}
+.week-day-num { font-weight: 600; font-size: 1.1rem; }
+.week-grid-body {
+  display: grid;
+  grid-template-columns: 56px repeat(7, 1fr);
+  position: relative;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+.week-hours-col, .week-day-col { display: flex; flex-direction: column; }
+.week-day-col {
+  position: relative;
+  border-left: 1px solid #333;
+}
+.week-hour-row, .week-hour-slot {
+  height: var(--week-px-per-hour, 36px);
+  border-bottom: 1px solid #2a2a2a;
+  box-sizing: border-box;
+}
+.week-hour-row {
+  font-size: 0.7rem;
+  color: #666;
+  text-align: right;
+  padding-right: 4px;
+  padding-top: 2px;
+  font-family: var(--bs-font-monospace, monospace);
+}
+.week-hour-slot { cursor: cell; transition: background-color 0.1s; }
+.week-hour-slot:hover { background: rgba(255,255,255,0.02); }
+.week-hour-slot.drag-over { background: rgba(25, 135, 84, 0.2); }
+.week-event {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  background: #0d6efd;
+  color: #fff;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.75rem;
+  cursor: grab;
+  border-left: 3px solid #0a58ca;
+  z-index: 2;
+  min-height: 24px;
+  overflow: hidden;
+}
+.week-event:active { cursor: grabbing; }
+.week-event:hover { filter: brightness(1.15); }
+.week-event.persistent { background: #198754; border-left-color: #146c43; }
+.week-event.disabled { background: #555; border-left-color: #444; opacity: 0.6; }
+.week-event.past { opacity: 0.5; background: #6c757d; border-left-color: #495057; }
+.week-event-time { font-family: var(--bs-font-monospace, monospace); font-weight: 600; }
+.week-event-name { font-weight: 500; }

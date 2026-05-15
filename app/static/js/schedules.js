@@ -413,6 +413,493 @@
     });
   }
 
-  // Bind actions on server-rendered rows
-  document.querySelectorAll('#schedules-table-body tr').forEach(bindRowActions);
+  // Bind actions on server-rendered rows (active + past tables)
+  document.querySelectorAll('#schedules-table-body tr, #past-schedules-table-body tr').forEach(bindRowActions);
+
+  // ── Past-schedules toggle ──────────────────────────────────────────────────
+
+  document.getElementById('btn-toggle-past')?.addEventListener('click', function () {
+    const wrap = document.getElementById('past-schedules-wrap');
+    if (!wrap) return;
+    const shown = this.dataset.shown === 'true';
+    wrap.style.display = shown ? 'none' : '';
+    this.dataset.shown = shown ? 'false' : 'true';
+    const pastBody = document.getElementById('past-schedules-table-body');
+    const n = pastBody ? pastBody.querySelectorAll('tr').length : 0;
+    const label = document.getElementById('btn-toggle-past-label');
+    if (label) {
+      const noun = n === 1 ? 'past schedule' : 'past schedules';
+      label.textContent = shown ? `Show ${n} ${noun}` : `Hide ${n} ${noun}`;
+    }
+  });
+
+  // ── View toggle (List / Month / Week) ──────────────────────────────────────
+
+  const panes = {
+    list:  document.getElementById('view-list-pane'),
+    month: document.getElementById('view-month-pane'),
+    week:  document.getElementById('view-week-pane'),
+  };
+
+  function showView(name) {
+    for (const k in panes) if (panes[k]) panes[k].style.display = (k === name) ? '' : 'none';
+    if (name === 'month' && !monthState.rendered) renderMonth();
+    if (name === 'week'  && !weekState.rendered)  renderWeek();
+    try { localStorage.setItem('leash.schedules.view', name); } catch (_) {}
+  }
+
+  document.querySelectorAll('input[name="sched-view"]').forEach(input => {
+    input.addEventListener('change', () => { if (input.checked) showView(input.value); });
+  });
+
+  // Restore last view choice
+  try {
+    const saved = localStorage.getItem('leash.schedules.view');
+    if (saved && panes[saved]) {
+      const radio = document.getElementById(`view-${saved}`);
+      if (radio) { radio.checked = true; showView(saved); }
+    }
+  } catch (_) {}
+
+  // ── Calendar shared helpers ────────────────────────────────────────────────
+
+  const DOW_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const MONTH_LABELS = ['January','February','March','April','May','June',
+                        'July','August','September','October','November','December'];
+
+  function ymd(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dd}`;
+  }
+
+  function parseYmd(s) {
+    const [y, m, d] = s.split('-').map(Number);
+    return new Date(y, m - 1, d);
+  }
+
+  function startOfWeekMonday(d) {
+    // 0=Sun, 1=Mon … 6=Sat. Shift to Monday-first.
+    const out = new Date(d);
+    const dow = (out.getDay() + 6) % 7;  // 0=Mon … 6=Sun
+    out.setDate(out.getDate() - dow);
+    out.setHours(0, 0, 0, 0);
+    return out;
+  }
+
+  async function fetchOccurrences(startStr, endStr) {
+    const url = `/api/schedules/occurrences?start=${startStr}&end=${endStr}`;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      window.Leash.toast('Failed to load schedule occurrences', 'danger');
+      return [];
+    }
+    return resp.json();
+  }
+
+  function eventTooltip(occ) {
+    const lines = [occ.name, `${occ.date} ${occ.time_of_day}`];
+    if (occ.snapshot_name) lines.push(`Snapshot: ${occ.snapshot_name}`);
+    if (occ.camera_name)   lines.push(`Camera: ${occ.camera_name} #${occ.preset_number}`);
+    if (occ.persistent)    lines.push('Persistent');
+    if (!occ.enabled)      lines.push('(disabled)');
+    return lines.join('\n');
+  }
+
+  function openEditForScheduleId(id) {
+    // Find the rendered edit button for this schedule and reuse its dataset.
+    const btn = document.querySelector(`.btn-edit-sched[data-sched-id="${id}"]`);
+    if (btn) { openEditModal(btn); return; }
+    // Past-events table was hidden but the row still exists — same selector covers it.
+    // If for some reason the row is absent (e.g. page hasn't fetched it), fall back to a fetch.
+    fetch(`/api/schedules/${id}`).then(r => r.json()).then(s => {
+      const fake = { dataset: {
+        schedId: String(s.id),
+        name: s.name,
+        snapshotId: s.snapshot_id || '',
+        mode: s.schedule_mode || 'weekly',
+        days: s.days_of_week || '',
+        runDate: s.run_date || '',
+        endDate: s.end_date || '',
+        time: s.time_of_day,
+        enabled: String(s.enabled),
+        persistent: String(s.persistent),
+        persistMinutes: String(s.persist_minutes),
+      }};
+      openEditModal(fake);
+    });
+  }
+
+  function openCreateForDate(dateStr, timeStr) {
+    clearModal();
+    document.getElementById('sched-mode').value = 'once';
+    applyModeUI('once');
+    document.getElementById('sched-run-date').value = dateStr;
+    if (timeStr) document.getElementById('sched-time').value = timeStr;
+    modal.show();
+  }
+
+  async function rescheduleOccurrence(scheduleId, scheduleMode, newDateStr, newTimeStr) {
+    const body = {};
+    if (newDateStr) body.run_date = newDateStr;
+    if (newTimeStr) body.time_of_day = newTimeStr;
+    const resp = await fetch(`/api/schedules/${scheduleId}/reschedule`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      window.Leash.toast(data.error || 'Reschedule failed', 'danger');
+      return false;
+    }
+    window.Leash.toast('Schedule moved', 'success');
+    // Re-render whatever calendar view is open so things update without a reload.
+    monthState.rendered = false;
+    weekState.rendered = false;
+    const active = document.querySelector('input[name="sched-view"]:checked');
+    if (active && active.value === 'month') renderMonth();
+    else if (active && active.value === 'week') renderWeek();
+    return true;
+  }
+
+  // ── Month view ─────────────────────────────────────────────────────────────
+
+  const monthState = { year: 0, month: 0, rendered: false };
+  (function initMonth() {
+    const now = new Date();
+    monthState.year = now.getFullYear();
+    monthState.month = now.getMonth();
+  })();
+
+  document.getElementById('cal-prev')?.addEventListener('click', () => {
+    monthState.month -= 1;
+    if (monthState.month < 0) { monthState.month = 11; monthState.year -= 1; }
+    renderMonth();
+  });
+  document.getElementById('cal-next')?.addEventListener('click', () => {
+    monthState.month += 1;
+    if (monthState.month > 11) { monthState.month = 0; monthState.year += 1; }
+    renderMonth();
+  });
+  document.getElementById('cal-today')?.addEventListener('click', () => {
+    const now = new Date();
+    monthState.year = now.getFullYear();
+    monthState.month = now.getMonth();
+    renderMonth();
+  });
+
+  async function renderMonth() {
+    const grid = document.getElementById('month-grid');
+    if (!grid) return;
+    monthState.rendered = true;
+
+    const first = new Date(monthState.year, monthState.month, 1);
+    const last = new Date(monthState.year, monthState.month + 1, 0);
+    document.getElementById('cal-title').textContent =
+      `${MONTH_LABELS[monthState.month]} ${monthState.year}`;
+
+    // Show the 6 weeks that cover this month, Monday-first.
+    const gridStart = startOfWeekMonday(first);
+    const gridEnd = new Date(gridStart);
+    gridEnd.setDate(gridEnd.getDate() + 41);  // 6 weeks * 7 days - 1
+
+    grid.textContent = '';
+
+    // Header row
+    const head = document.createElement('div');
+    head.className = 'month-grid-head';
+    DOW_LABELS.forEach(label => {
+      const c = document.createElement('div');
+      c.className = 'month-grid-head-cell';
+      c.textContent = label;
+      head.appendChild(c);
+    });
+    grid.appendChild(head);
+
+    // Body
+    const body = document.createElement('div');
+    body.className = 'month-grid-body';
+    grid.appendChild(body);
+
+    const today = ymd(new Date());
+    const dayByDate = new Map();
+    const cur = new Date(gridStart);
+    for (let i = 0; i < 42; i++) {
+      const cell = document.createElement('div');
+      const dateStr = ymd(cur);
+      cell.className = 'month-cell';
+      cell.dataset.date = dateStr;
+      if (cur.getMonth() !== monthState.month) cell.classList.add('out-of-month');
+      if (dateStr === today) cell.classList.add('today');
+
+      const cellHead = document.createElement('div');
+      cellHead.className = 'month-cell-head';
+      const num = document.createElement('span');
+      num.className = 'month-cell-num';
+      num.textContent = String(cur.getDate());
+      cellHead.appendChild(num);
+      cell.appendChild(cellHead);
+
+      const events = document.createElement('div');
+      events.className = 'month-cell-events';
+      cell.appendChild(events);
+
+      // Click empty area → create new schedule on this date
+      cell.addEventListener('click', e => {
+        if (e.target.closest('.month-event')) return;
+        openCreateForDate(dateStr, '');
+      });
+
+      // Drag target
+      cell.addEventListener('dragover', e => {
+        if (dragState.scheduleId) { e.preventDefault(); cell.classList.add('drag-over'); }
+      });
+      cell.addEventListener('dragleave', () => cell.classList.remove('drag-over'));
+      cell.addEventListener('drop', e => {
+        cell.classList.remove('drag-over');
+        if (!dragState.scheduleId) return;
+        e.preventDefault();
+        const targetDate = cell.dataset.date;
+        const { scheduleId, mode } = dragState;
+        dragState.scheduleId = null;
+        if (mode !== 'once') {
+          window.Leash.toast('Only one-time schedules can be moved. Use Edit for recurring.', 'warning');
+          return;
+        }
+        rescheduleOccurrence(scheduleId, mode, targetDate, '');
+      });
+
+      dayByDate.set(dateStr, events);
+      body.appendChild(cell);
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    const occurrences = await fetchOccurrences(ymd(gridStart), ymd(gridEnd));
+    // Sort by time so events appear in chronological order within a day
+    occurrences.sort((a, b) => a.time_of_day.localeCompare(b.time_of_day));
+
+    occurrences.forEach(occ => {
+      const slot = dayByDate.get(occ.date);
+      if (!slot) return;
+      slot.appendChild(buildMonthEvent(occ));
+    });
+  }
+
+  function buildMonthEvent(occ) {
+    const pill = document.createElement('div');
+    const cls = ['month-event'];
+    if (!occ.enabled) cls.push('disabled');
+    if (occ.is_past) cls.push('past');
+    if (occ.persistent) cls.push('persistent');
+    if (occ.schedule_mode === 'once') cls.push('draggable');
+    pill.className = cls.join(' ');
+    pill.title = eventTooltip(occ);
+    pill.dataset.scheduleId = occ.schedule_id;
+    pill.dataset.mode = occ.schedule_mode;
+
+    const t = document.createElement('span');
+    t.className = 'month-event-time';
+    t.textContent = occ.time_of_day;
+    pill.appendChild(t);
+
+    const n = document.createElement('span');
+    n.className = 'month-event-name';
+    n.textContent = ' ' + occ.name;
+    pill.appendChild(n);
+
+    pill.addEventListener('click', e => {
+      e.stopPropagation();
+      openEditForScheduleId(occ.schedule_id);
+    });
+
+    if (occ.schedule_mode === 'once') {
+      pill.draggable = true;
+      pill.addEventListener('dragstart', e => {
+        dragState.scheduleId = occ.schedule_id;
+        dragState.mode = occ.schedule_mode;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', String(occ.schedule_id));
+      });
+      pill.addEventListener('dragend', () => {
+        dragState.scheduleId = null;
+        document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+      });
+    }
+    return pill;
+  }
+
+  // ── Week view ──────────────────────────────────────────────────────────────
+
+  const weekState = { start: null, rendered: false };
+  (function initWeek() {
+    weekState.start = startOfWeekMonday(new Date());
+  })();
+
+  document.getElementById('week-prev')?.addEventListener('click', () => {
+    weekState.start.setDate(weekState.start.getDate() - 7);
+    renderWeek();
+  });
+  document.getElementById('week-next')?.addEventListener('click', () => {
+    weekState.start.setDate(weekState.start.getDate() + 7);
+    renderWeek();
+  });
+  document.getElementById('week-today')?.addEventListener('click', () => {
+    weekState.start = startOfWeekMonday(new Date());
+    renderWeek();
+  });
+
+  const WEEK_HOUR_START = 0;
+  const WEEK_HOUR_END = 24;  // hours 0..23 shown
+  const WEEK_PX_PER_HOUR = 36;
+
+  async function renderWeek() {
+    const grid = document.getElementById('week-grid');
+    if (!grid) return;
+    weekState.rendered = true;
+
+    const start = new Date(weekState.start);
+    const end = new Date(start);
+    end.setDate(end.getDate() + 6);
+    document.getElementById('week-title').textContent =
+      `${start.toLocaleDateString(undefined, {month:'short', day:'numeric'})} – ${end.toLocaleDateString(undefined, {month:'short', day:'numeric', year:'numeric'})}`;
+
+    grid.textContent = '';
+
+    // Header row: blank + 7 day labels
+    const head = document.createElement('div');
+    head.className = 'week-grid-head';
+    head.appendChild(document.createElement('div'));  // spacer
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(start);
+      d.setDate(d.getDate() + i);
+      const c = document.createElement('div');
+      c.className = 'week-grid-head-cell';
+      if (ymd(d) === ymd(new Date())) c.classList.add('today');
+      c.innerHTML = `<div class="week-dow">${DOW_LABELS[i]}</div><div class="week-day-num">${d.getDate()}</div>`;
+      head.appendChild(c);
+    }
+    grid.appendChild(head);
+
+    // Body: hour rows × 7 day columns
+    const body = document.createElement('div');
+    body.className = 'week-grid-body';
+    body.style.setProperty('--week-hours', String(WEEK_HOUR_END - WEEK_HOUR_START));
+    body.style.setProperty('--week-px-per-hour', `${WEEK_PX_PER_HOUR}px`);
+
+    // Hour labels column
+    const hours = document.createElement('div');
+    hours.className = 'week-hours-col';
+    for (let h = WEEK_HOUR_START; h < WEEK_HOUR_END; h++) {
+      const row = document.createElement('div');
+      row.className = 'week-hour-row';
+      row.textContent = `${String(h).padStart(2,'0')}:00`;
+      hours.appendChild(row);
+    }
+    body.appendChild(hours);
+
+    const dayCols = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(start);
+      d.setDate(d.getDate() + i);
+      const dateStr = ymd(d);
+      const col = document.createElement('div');
+      col.className = 'week-day-col';
+      col.dataset.date = dateStr;
+
+      for (let h = WEEK_HOUR_START; h < WEEK_HOUR_END; h++) {
+        const slot = document.createElement('div');
+        slot.className = 'week-hour-slot';
+        slot.dataset.hour = String(h);
+        slot.addEventListener('click', () => {
+          openCreateForDate(dateStr, `${String(h).padStart(2,'0')}:00`);
+        });
+        slot.addEventListener('dragover', e => {
+          if (dragState.scheduleId) { e.preventDefault(); slot.classList.add('drag-over'); }
+        });
+        slot.addEventListener('dragleave', () => slot.classList.remove('drag-over'));
+        slot.addEventListener('drop', e => {
+          slot.classList.remove('drag-over');
+          if (!dragState.scheduleId) return;
+          e.preventDefault();
+          const rect = slot.getBoundingClientRect();
+          const offset = e.clientY - rect.top;
+          const fraction = Math.max(0, Math.min(1, offset / rect.height));
+          // Snap to 15-minute increments
+          const totalMinutes = Math.round((h * 60 + fraction * 60) / 15) * 15;
+          const hh = String(Math.floor(totalMinutes / 60) % 24).padStart(2, '0');
+          const mm = String(totalMinutes % 60).padStart(2, '0');
+          const newTime = `${hh}:${mm}`;
+          const { scheduleId, mode, sourceDate } = dragState;
+          dragState.scheduleId = null;
+          const sameDay = sourceDate === dateStr;
+          if (!sameDay && mode !== 'once') {
+            window.Leash.toast('Only one-time schedules can change date. Edit recurring schedules to change days.', 'warning');
+            return;
+          }
+          rescheduleOccurrence(scheduleId, mode, sameDay ? '' : dateStr, newTime);
+        });
+        col.appendChild(slot);
+      }
+      dayCols.push({ date: dateStr, el: col });
+      body.appendChild(col);
+    }
+    grid.appendChild(body);
+
+    const occurrences = await fetchOccurrences(ymd(start), ymd(end));
+    occurrences.forEach(occ => {
+      const dc = dayCols.find(c => c.date === occ.date);
+      if (!dc) return;
+      const [hh, mm] = occ.time_of_day.split(':').map(Number);
+      const topPx = ((hh - WEEK_HOUR_START) + mm / 60) * WEEK_PX_PER_HOUR;
+      const ev = buildWeekEvent(occ, topPx);
+      dc.el.appendChild(ev);
+    });
+  }
+
+  function buildWeekEvent(occ, topPx) {
+    const block = document.createElement('div');
+    const cls = ['week-event'];
+    if (!occ.enabled) cls.push('disabled');
+    if (occ.is_past) cls.push('past');
+    if (occ.persistent) cls.push('persistent');
+    block.className = cls.join(' ');
+    block.style.top = `${topPx}px`;
+    block.title = eventTooltip(occ);
+    block.dataset.scheduleId = occ.schedule_id;
+    block.dataset.mode = occ.schedule_mode;
+
+    const t = document.createElement('div');
+    t.className = 'week-event-time';
+    t.textContent = occ.time_of_day;
+    block.appendChild(t);
+
+    const n = document.createElement('div');
+    n.className = 'week-event-name';
+    n.textContent = occ.name;
+    block.appendChild(n);
+
+    block.addEventListener('click', e => {
+      e.stopPropagation();
+      openEditForScheduleId(occ.schedule_id);
+    });
+
+    block.draggable = true;
+    block.addEventListener('dragstart', e => {
+      dragState.scheduleId = occ.schedule_id;
+      dragState.mode = occ.schedule_mode;
+      dragState.sourceDate = occ.date;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(occ.schedule_id));
+    });
+    block.addEventListener('dragend', () => {
+      dragState.scheduleId = null;
+      document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+    });
+    return block;
+  }
+
+  // Shared drag state for month + week views
+  const dragState = { scheduleId: null, mode: null, sourceDate: null };
 })();
