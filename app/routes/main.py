@@ -115,6 +115,31 @@ def schedules():
     )
 
 
+@main_bp.route("/operator")
+def operator():
+    """Streamlined mobile-first control surface for operators on the move.
+
+    Renders one page with tabbed sections (Receivers / Snapshots / Groups /
+    PTZ) and a sticky search bar. Same data as /, /snapshots, /groups,
+    /cameras — just laid out for thumbs and one-tap actions.
+    """
+    receivers = NDIReceiver.query.order_by(NDIReceiver.index).all()
+    sources = _online_sources()
+    groups = ReceiverGroup.query.order_by(ReceiverGroup.name).all()
+    snapshots = Snapshot.query.order_by(Snapshot.created_at.desc()).all()
+    cameras = []
+    if _cameras_enabled():
+        cameras = PTZCamera.query.order_by(PTZCamera.index).all()
+    return render_template(
+        "operator.html",
+        receivers=receivers,
+        sources=sources,
+        groups=groups,
+        snapshots=snapshots,
+        cameras=cameras,
+    )
+
+
 @main_bp.route("/settings")
 def settings():
     settings_list = all_settings_dicts(mask_sensitive=True)

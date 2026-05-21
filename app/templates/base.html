@@ -77,6 +77,13 @@
             <i class="bi bi-gear me-1"></i>Settings
           </a>
         </li>
+        <li class="nav-item">
+          <a class="nav-link {% if request.endpoint == 'main.operator' %}active{% endif %}"
+             href="{{ url_for('main.operator') }}"
+             title="Streamlined view for control on the move">
+            <i class="bi bi-phone me-1"></i>Operator
+          </a>
+        </li>
       </ul>
       <div class="d-flex gap-2 flex-wrap align-items-center">
         <button id="btn-scan" class="btn btn-sm btn-outline-primary" title="Scan subnet for BirdDog PLAY devices">
@@ -152,7 +159,7 @@
 
 <!-- Scan result modal -->
 <div class="modal fade" id="scanResultModal" tabindex="-1">
-  <div class="modal-dialog modal-lg">
+  <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title"><i class="bi bi-search me-2"></i>Network Scan Results</h5>
@@ -197,6 +204,16 @@
     <button type="button" class="btn-close btn-close-sm" data-bs-dismiss="alert"></button>
   </div>
   {% endif %}
+
+  {# Operator-view suggestion — revealed by JS on touch + narrow viewport only.
+     Dismiss persists in localStorage so the hint shows at most once. #}
+  <div id="operator-suggest-banner" class="alert alert-info alert-dismissible py-2 mb-3 small" role="alert">
+    <i class="bi bi-phone me-1"></i>
+    On a phone? Try the
+    <a href="{{ url_for('main.operator') }}" class="alert-link">Operator view</a>
+    for one-tap control while walking the venue.
+    <button type="button" class="btn-close btn-close-sm" data-bs-dismiss="alert" aria-label="Dismiss"></button>
+  </div>
 
   {% block content %}{% endblock %}
 </main>

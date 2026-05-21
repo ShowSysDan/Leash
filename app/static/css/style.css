@@ -474,3 +474,271 @@
 .week-event.past { opacity: 0.5; background: #6c757d; border-left-color: #495057; }
 .week-event-time { font-family: var(--bs-font-monospace, monospace); font-weight: 600; }
 .week-event-name { font-weight: 500; }
+
+/* ── Receiver search bar ─────────────────────────────────────────────────
+   Filters the receivers grid client-side by hostname / IP. Sticky on phones
+   so it stays in view while scrolling a long list. */
+.receiver-search-bar {
+  margin-bottom: 0.75rem;
+}
+.receiver-search-bar .form-control {
+  background-color: rgba(0, 0, 0, 0.35);
+  color: #f0f0f0;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+.receiver-search-bar .form-control:focus {
+  border-color: rgba(80, 140, 255, 0.6);
+  box-shadow: 0 0 0 0.2rem rgba(80, 140, 255, 0.15);
+}
+.receiver-search-bar .input-group-text {
+  background-color: rgba(0, 0, 0, 0.45);
+  color: #adb5bd;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+@media (max-width: 767.98px) {
+  .receiver-search-bar {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: rgba(33, 37, 41, 0.96);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+    margin: -1rem -0.75rem 0.75rem;
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .receiver-search-bar .form-control {
+    font-size: 1rem;
+    min-height: 44px;
+  }
+}
+
+/* Cards hidden by the search filter. !important beats Bootstrap row utilities. */
+.col-search-hidden { display: none !important; }
+
+/* ── Mobile responsive tightening ────────────────────────────────────────
+   Below md (<768px): bigger tap targets, larger select font, friendlier
+   modal layouts, and more breathing room on receiver cards. */
+@media (max-width: 767.98px) {
+  /* Bump tiny action buttons up to comfortable touch sizes */
+  .btn-xs {
+    padding: 0.45rem 0.7rem;
+    font-size: 0.85rem;
+    line-height: 1.2;
+    min-height: 38px;
+    min-width: 38px;
+  }
+
+  /* Native selects need ~16px to stop iOS zooming on focus */
+  .form-select,
+  .form-control,
+  .form-select-sm,
+  .form-control-sm {
+    font-size: 1rem;
+  }
+  .receiver-card .source-select {
+    font-size: 1rem;
+    padding: 0.55rem 2rem 0.55rem 0.6rem;
+    min-height: 44px;
+  }
+
+  /* Card content can use more vertical space on a tall phone screen */
+  .receiver-card .card-header,
+  .receiver-card .card-body,
+  .receiver-card .card-footer {
+    padding: 0.55rem 0.75rem;
+  }
+  .receiver-card .card-footer .btn-xs {
+    flex: 1 1 auto;
+  }
+
+  /* Navbar toolbar buttons collapse into the hamburger; let them stack
+     wider when the menu is open so each is a comfortable touch target. */
+  .navbar-collapse .btn {
+    min-height: 42px;
+  }
+
+  /* PTZ camera detail page — pad the d-pad so it's centred and finger-sized */
+  .ptz-btn { min-width: 3.5rem; min-height: 3.5rem; }
+}
+
+/* ── Mobile card list (replaces dense tables below md) ─────────────────── */
+.mobile-card-list { display: none; }
+@media (max-width: 767.98px) {
+  .table-responsive.d-md-block { display: none !important; }
+  .mobile-card-list { display: block; }
+}
+.mobile-card-list .mc-row {
+  background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0) 100%), #1f2228;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 0.5rem;
+  padding: 0.7rem 0.85rem;
+  margin-bottom: 0.6rem;
+}
+.mobile-card-list .mc-row.past {
+  opacity: 0.6;
+  border-style: dashed;
+}
+.mobile-card-list .mc-title {
+  font-weight: 600;
+  color: #e6e9ee;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.25rem;
+  word-break: break-word;
+}
+.mobile-card-list .mc-meta {
+  font-size: 0.78rem;
+  color: #a8aeb8;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+  margin-bottom: 0.55rem;
+}
+.mobile-card-list .mc-meta .badge { font-weight: 500; }
+.mobile-card-list .mc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.mobile-card-list .mc-actions .btn { flex: 1 1 auto; min-height: 38px; }
+
+/* Layout canvas: prevent native pan/zoom from interfering with drag. */
+.layout-canvas { touch-action: none; }
+
+/* Mobile-only up/down reorder controls for the layouts list */
+.layout-reorder-mobile { display: none; }
+@media (max-width: 767.98px) {
+  .layout-reorder-mobile {
+    display: flex;
+    gap: 0.25rem;
+    margin-top: 0.4rem;
+  }
+  .layout-reorder-mobile .btn { flex: 1 1 auto; min-height: 38px; }
+  .layout-drag-handle { display: none; }
+  /* Layout tiles look better full-width on a phone */
+  .layout-col { flex: 0 0 100%; max-width: 100%; }
+}
+
+/* ── Operator (mobile-first) shell ───────────────────────────────────────
+   /operator is a streamlined home for AV operators walking the venue.
+   Tabbed bottom-nav, big tap targets, one-tap snapshot recall + group send. */
+.operator-shell { padding-bottom: 88px; }
+
+.operator-search-bar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(33, 37, 41, 0.96);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  margin: -1rem -0.75rem 0.75rem;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.operator-receiver-row {
+  background: #1f2228;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0.55rem;
+  padding: 0.7rem 0.85rem;
+  margin-bottom: 0.55rem;
+}
+.operator-receiver-row.is-offline { opacity: 0.65; border-color: rgba(220, 53, 69, 0.35); }
+.operator-receiver-row .op-rcv-head {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.4rem;
+}
+.operator-receiver-row .op-rcv-name {
+  font-weight: 600;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.operator-receiver-row .op-rcv-ip {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+  color: #a8aeb8;
+}
+.operator-receiver-row select {
+  font-size: 1rem;
+  min-height: 44px;
+}
+
+.operator-action-row {
+  background: #1f2228;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 0.55rem;
+  padding: 0.75rem 0.9rem;
+  margin-bottom: 0.6rem;
+}
+.operator-action-row .op-action-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.35rem;
+}
+.operator-action-row .op-action-title { font-weight: 600; }
+.operator-action-row .op-action-meta {
+  font-size: 0.78rem;
+  color: #a8aeb8;
+}
+.operator-action-row .op-action-controls {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+.operator-action-row .op-action-controls select { flex: 1 1 auto; min-height: 44px; }
+.operator-action-row .op-action-controls .btn { min-height: 44px; }
+
+/* Bottom tab navigation, fixed to the viewport edge */
+.operator-bottom-nav {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  background: #1a1d22;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  z-index: 1030;
+  padding: 0.2rem 0;
+  box-shadow: 0 -2px 14px rgba(0, 0, 0, 0.5);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+.operator-bottom-nav button {
+  flex: 1 1 0;
+  background: transparent;
+  border: none;
+  color: #9aa2ac;
+  padding: 0.45rem 0.25rem 0.35rem;
+  font-size: 0.7rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  cursor: pointer;
+  border-radius: 0;
+  min-height: 56px;
+  transition: color 0.12s;
+}
+.operator-bottom-nav button i {
+  font-size: 1.35rem;
+  line-height: 1;
+}
+.operator-bottom-nav button.active { color: #ffc107; }
+.operator-bottom-nav button:focus { outline: none; color: #f1f5fa; }
+.operator-bottom-nav button:active { background: rgba(255, 255, 255, 0.04); }
+
+/* Operator-mode suggestion banner shown on mobile when on a desktop page */
+#operator-suggest-banner {
+  display: none;
+  border-left: 4px solid #0dcaf0;
+}
+@media (max-width: 767.98px) {
+  #operator-suggest-banner.is-visible { display: block; }
+}

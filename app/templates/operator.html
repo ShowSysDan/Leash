@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Operator — Leash NDI Source Control{% endblock %}
+
+{% block content %}
+<div class="operator-shell">
+
+  {# ── Receivers tab ──────────────────────────────────────────────────── #}
+  <section class="operator-pane" data-pane="receivers">
+    <div class="operator-search-bar">
+      <div class="input-group">
+        <span class="input-group-text"><i class="bi bi-search"></i></span>
+        <input id="op-search" type="search" class="form-control"
+               placeholder="Filter by hostname or IP last octet…"
+               autocomplete="off" inputmode="search" aria-label="Filter receivers">
+        <button type="button" class="btn btn-outline-secondary" id="op-search-clear"
+                style="display:none" aria-label="Clear search">
+          <i class="bi bi-x-lg"></i>
+        </button>
+        <span class="input-group-text small text-muted" id="op-search-count"
+              style="display:none">0 / 0</span>
+      </div>
+    </div>
+
+    <div class="d-flex align-items-center mb-2 gap-2 small text-muted">
+      <i class="bi bi-broadcast-pin"></i>
+      <span>{{ receivers|length }} receivers</span>
+      <span class="ms-auto form-check form-switch m-0">
+        <input class="form-check-input" type="checkbox" id="op-show-offline" checked>
+        <label class="form-check-label" for="op-show-offline">Show offline</label>
+      </span>
+    </div>
+
+    {% if not receivers %}
+    <div class="alert alert-secondary text-center py-4 small">
+      <i class="bi bi-wifi-off d-block mb-2 fs-3"></i>
+      No receivers yet. Run a scan from the main menu.
+    </div>
+    {% else %}
+    <div id="op-receivers-list">
+      {% for r in receivers %}
+      <div class="operator-receiver-row {% if r.status == 'offline' %}is-offline op-rcv-offline{% endif %}"
+           data-rid="{{ r.id }}"
+           data-status="{{ r.status }}"
+           data-search="{{ ((r.hostname or '') ~ ' ' ~ (r.label or '') ~ ' ' ~ (r.ip_address or '') ~ ' ' ~ ('.' ~ r.ip_last_octet|string if r.ip_last_octet is not none else ''))|lower }}">
+        <div class="op-rcv-head">
+          <span class="status-dot status-{{ r.status }}"></span>
+          <span class="op-rcv-name">{{ r.hostname or r.label or ('Player ' ~ r.ip_last_octet) }}</span>
+          <span class="op-rcv-ip">{{ r.ip_address }}</span>
+        </div>
+        <select class="form-select op-rcv-source"
+                {% if r.status == 'offline' %}disabled{% endif %}>
+          <option value="">— select source —</option>
+          {% for s in sources %}
+          <option value="{{ s.name }}"
+                  {% if r.current_source == s.name %}selected{% endif %}>
+            {{ s.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endfor %}
+    </div>
+    <div id="op-search-empty" class="text-muted small text-center py-3" style="display:none">
+      <i class="bi bi-search me-1"></i>No receivers match your filter.
+    </div>
+    {% endif %}
+  </section>
+
+  {# ── Snapshots tab — one-tap recall ─────────────────────────────────── #}
+  <section class="operator-pane" data-pane="snapshots" style="display:none">
+    {% if not snapshots %}
+    <div class="alert alert-secondary text-center py-4 small">
+      <i class="bi bi-camera d-block mb-2 fs-3"></i>
+      No snapshots yet.
+    </div>
+    {% else %}
+    <p class="text-muted small mb-2">Tap <strong>Recall</strong> to push a saved routing to every receiver in the snapshot.</p>
+    {% for snap in snapshots %}
+    <div class="operator-action-row">
+      <div class="op-action-head">
+        <i class="bi bi-camera text-info"></i>
+        <span class="op-action-title">{{ snap.name }}</span>
+      </div>
+      <div class="op-action-meta">
+        {{ snap.entry_count }} receivers · {{ snap.created_at.strftime('%Y-%m-%d') }}
+        {% if snap.description %}<br>{{ snap.description }}{% endif %}
+      </div>
+      <div class="op-action-controls">
+        <button class="btn btn-success op-recall-snap"
+                data-snap-id="{{ snap.id }}" data-snap-name="{{ snap.name }}">
+          <i class="bi bi-play-fill me-1"></i>Recall
+        </button>
+      </div>
+    </div>
+    {% endfor %}
+    {% endif %}
+  </section>
+
+  {# ── Groups tab — pick a source, send to whole group ────────────────── #}
+  <section class="operator-pane" data-pane="groups" style="display:none">
+    {% if not groups %}
+    <div class="alert alert-secondary text-center py-4 small">
+      <i class="bi bi-tags d-block mb-2 fs-3"></i>
+      No groups yet.
+    </div>
+    {% else %}
+    <p class="text-muted small mb-2">Pick a source and push it to every online member of the group.</p>
+    {% for g in groups %}
+    <div class="operator-action-row">
+      <div class="op-action-head">
+        <span class="group-swatch" style="background:{{ g.color }}"></span>
+        <span class="op-action-title">{{ g.name }}</span>
+        <span class="badge bg-secondary ms-1">{{ g.receivers|length }}</span>
+      </div>
+      {% if g.description %}
+      <div class="op-action-meta">{{ g.description }}</div>
+      {% endif %}
+      <div class="op-action-controls">
+        <select class="form-select op-group-source" data-gid="{{ g.id }}">
+          <option value="">— source —</option>
+          {% for s in sources %}
+          <option value="{{ s.name }}">{{ s.name }}</option>
+          {% endfor %}
+        </select>
+        <button class="btn btn-warning op-send-group"
+                data-gid="{{ g.id }}" data-gname="{{ g.name }}"
+                {% if not g.receivers %}disabled{% endif %}>
+          <i class="bi bi-send"></i>
+        </button>
+      </div>
+    </div>
+    {% endfor %}
+    {% endif %}
+  </section>
+
+  {# ── PTZ tab — link out to per-camera control ───────────────────────── #}
+  {% if config.CAMERAS_ENABLED %}
+  <section class="operator-pane" data-pane="ptz" style="display:none">
+    {% if not cameras %}
+    <div class="alert alert-secondary text-center py-4 small">
+      <i class="bi bi-camera-video d-block mb-2 fs-3"></i>
+      No PTZ cameras yet.
+    </div>
+    {% else %}
+    {% for cam in cameras %}
+    <a href="{{ url_for('main.camera_detail', camera_id=cam.id) }}"
+       class="operator-action-row text-decoration-none d-block"
+       style="color:inherit">
+      <div class="op-action-head">
+        <span class="status-dot status-{{ cam.status }}"></span>
+        <span class="op-action-title">{{ cam.hostname or cam.label or ('.' ~ cam.ip_last_octet) }}</span>
+        <i class="bi bi-joystick ms-auto text-warning"></i>
+      </div>
+      <div class="op-action-meta">
+        .{{ cam.ip_last_octet }}
+        {% if cam.model %} · {{ cam.model }}{% endif %}
+        {% if cam.presets %} · {{ cam.presets|length }} preset{{ '' if cam.presets|length == 1 else 's' }}{% endif %}
+      </div>
+    </a>
+    {% endfor %}
+    {% endif %}
+  </section>
+  {% endif %}
+
+</div>
+
+<nav class="operator-bottom-nav" aria-label="Operator sections">
+  <button type="button" class="active" data-tab="receivers">
+    <i class="bi bi-grid-3x3-gap"></i><span>Receivers</span>
+  </button>
+  <button type="button" data-tab="snapshots">
+    <i class="bi bi-camera"></i><span>Snapshots</span>
+  </button>
+  <button type="button" data-tab="groups">
+    <i class="bi bi-tags"></i><span>Groups</span>
+  </button>
+  {% if config.CAMERAS_ENABLED %}
+  <button type="button" data-tab="ptz">
+    <i class="bi bi-joystick"></i><span>PTZ</span>
+  </button>
+  {% endif %}
+</nav>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/operator.js') }}"></script>
+{% endblock %}

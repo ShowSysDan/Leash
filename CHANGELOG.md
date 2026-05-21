@@ -6,6 +6,52 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.1.0] — 2026-05-21
+
+Mobile-friendly responsive UI pass + dedicated operator surface.
+
+### Added
+
+#### Operator View (`/operator`)
+- Streamlined mobile-first control surface for operators on the move
+- Bottom tab navigation: Receivers / Snapshots / Groups / PTZ
+- One-tap snapshot recall and one-tap group source-send with feedback toast
+- Sticky search bar on the Receivers tab — fuzzy-matches hostname and IP
+  last octet from a single input
+- Show/hide offline toggle remembered across sessions
+- 20-second auto-refresh of receiver state, paused while the tab is hidden
+- Last-selected tab persisted in localStorage
+- Suggestion banner on other pages prompts mobile users to try Operator
+  view (one-time, dismissible, never auto-redirects)
+
+#### Receivers page (`/`)
+- New search bar above the receivers grid — sticky on phone, inline on
+  desktop, filters by hostname or IP last octet client-side with a live
+  match counter and clear button
+- Composable filter classes so search + show-offline toggle work together
+  without clobbering each other
+
+#### Responsive UI tightening
+- Schedules and Snapshots list tables render as touch-friendly card lists
+  below the `md` breakpoint; desktop tables unchanged
+- Toggle / delete / stop-enforcement handlers patch both the table row
+  and the mobile card so state stays in sync on either layout
+- Layouts list now offers up/down reorder buttons on phone (HTML5 drag
+  doesn't work on touch); persists order via the existing reorder API
+- Layout canvas supports touch drag (mouse + touch event handlers share
+  a normalised pointer path)
+- Large `modal-fullscreen-sm-down` modals on phone for: Scan Result,
+  Add Receiver, Capture Snapshot, Preview Snapshot, Add Schedule,
+  Add Receivers to Layout, Manage Group Members
+- Bigger tap targets on action buttons (`btn-xs` ≥38 px on phone)
+- Native select fonts bumped to 16 px on phone to suppress iOS zoom
+
+### Changed
+- App version → `1.1.0`
+- New `Operator` link added to the main navbar
+
+---
+
 ## [1.0.0] — 2026-04-24
 
 First stable release. Full replacement for the QSYS Lua NDI routing script.

@@ -61,6 +61,16 @@
             </button>
           </div>
         </div>
+        <div class="layout-reorder-mobile">
+          <button class="btn btn-sm btn-outline-secondary btn-layout-up"
+                  title="Move up" aria-label="Move layout up">
+            <i class="bi bi-arrow-up"></i>
+          </button>
+          <button class="btn btn-sm btn-outline-secondary btn-layout-down"
+                  title="Move down" aria-label="Move layout down">
+            <i class="bi bi-arrow-down"></i>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -211,6 +221,49 @@ document.getElementById('btn-save-layout')?.addEventListener('click', async () =
   }
   editModal?.hide();
   window.Leash.toast('Layout updated', 'success');
+});
+
+// ── Mobile up/down reorder (touch-friendly alternative to HTML5 drag) ────
+async function persistLayoutOrder() {
+  const grid = document.getElementById('layouts-grid');
+  if (!grid) return;
+  const order = Array.from(grid.querySelectorAll('.layout-col'))
+                     .map(el => Number(el.dataset.layoutId))
+                     .filter(Boolean);
+  try {
+    const resp = await fetch('/api/layouts/reorder', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order }),
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      window.Leash.toast(data.error || 'Failed to save order', 'danger');
+    }
+  } catch (_err) {
+    window.Leash.toast('Failed to save order', 'danger');
+  }
+}
+
+document.querySelectorAll('.btn-layout-up').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const col = btn.closest('.layout-col');
+    const prev = col?.previousElementSibling;
+    if (col && prev) {
+      col.parentNode.insertBefore(col, prev);
+      persistLayoutOrder();
+    }
+  });
+});
+document.querySelectorAll('.btn-layout-down').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const col = btn.closest('.layout-col');
+    const next = col?.nextElementSibling;
+    if (col && next) {
+      col.parentNode.insertBefore(next, col);
+      persistLayoutOrder();
+    }
+  });
 });
 
 // ── Drag-to-reorder ──────────────────────────────────────────────────────
