@@ -67,7 +67,18 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // ── Drag helpers ─────────────────────────────────────────────────────────
+  // Touch events expose pointer coords differently from mouse events.
+  // This helper normalises either form so the rest of the drag logic
+  // doesn't have to care which input device the user is on.
+  function pointerXY(e) {
+    if (e.touches && e.touches.length)        return { x: e.touches[0].clientX,        y: e.touches[0].clientY };
+    if (e.changedTouches && e.changedTouches.length)
+      return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+    return { x: e.clientX, y: e.clientY };
+  }
+
   function startDrag(e, el, receiverId, labelId) {
+    const { x: ex, y: ey } = pointerXY(e);
     const primaryStartX = parseFloat(el.style.left) || 0;
     const primaryStartY = parseFloat(el.style.top)  || 0;
 
@@ -83,8 +94,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     dragging = {
       el,
-      offsetX:       e.clientX - el.getBoundingClientRect().left,
-      offsetY:       e.clientY - el.getBoundingClientRect().top,
+      offsetX:       ex - el.getBoundingClientRect().left,
+      offsetY:       ey - el.getBoundingClientRect().top,
       primaryStartX,
       primaryStartY,
       receiverId,
@@ -161,14 +172,16 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    // Drag / shift-select
-    div.addEventListener('mousedown', e => {
+    // Drag / shift-select — mouse + touch
+    const handleDown = e => {
       if (!editMode) return;
       if (e.target.closest('select, button')) return;
       if (e.shiftKey) { toggleSelect(div); e.preventDefault(); return; }
       if (!selected.has(div)) clearSelection();
       startDrag(e, div, pos.receiver_id, undefined);
-    });
+    };
+    div.addEventListener('mousedown',  handleDown);
+    div.addEventListener('touchstart', handleDown, { passive: false });
 
     return div;
   }
@@ -205,13 +218,15 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
 
-    div.addEventListener('mousedown', e => {
+    const labelHandleDown = e => {
       if (!editMode) return;
       if (e.target.closest('button')) return;
       if (e.shiftKey) { toggleSelect(div); e.preventDefault(); return; }
       if (!selected.has(div)) clearSelection();
       startDrag(e, div, undefined, label.id);
-    });
+    };
+    div.addEventListener('mousedown',  labelHandleDown);
+    div.addEventListener('touchstart', labelHandleDown, { passive: false });
 
     return div;
   }
@@ -226,12 +241,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   renderAll();
 
-  // ── Mouse move / up for drag ──────────────────────────────────────────────
-  document.addEventListener('mousemove', e => {
+  // ── Pointer move / up for drag (mouse + touch) ────────────────────────────
+  function handleMove(e) {
     if (!dragging) return;
+    const { x: ex, y: ey } = pointerXY(e);
     const rect = canvas.getBoundingClientRect();
-    let x = (e.clientX - rect.left - dragging.offsetX) / rect.width  * 100;
-    let y = (e.clientY - rect.top  - dragging.offsetY) / rect.height * 100;
+    let x = (ex - rect.left - dragging.offsetX) / rect.width  * 100;
+    let y = (ey - rect.top  - dragging.offsetY) / rect.height * 100;
     x = Math.max(0, Math.min(90, x));
     y = Math.max(0, Math.min(90, y));
     if (snapEnabled) {
@@ -248,9 +264,13 @@ document.addEventListener('DOMContentLoaded', () => {
       peer.el.style.left = `${Math.max(0, Math.min(90, peer.startX + dx))}%`;
       peer.el.style.top  = `${Math.max(0, Math.min(90, peer.startY + dy))}%`;
     });
-  });
+    // Prevent native scroll/zoom while a touch drag is in progress
+    if (e.cancelable) e.preventDefault();
+  }
+  document.addEventListener('mousemove', handleMove);
+  document.addEventListener('touchmove', handleMove, { passive: false });
 
-  document.addEventListener('mouseup', () => {
+  function handleUp() {
     if (!dragging) return;
     const el = dragging.el;
     const x  = parseFloat(el.style.left);
@@ -280,7 +300,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     el.classList.remove('dragging');
     dragging = null;
-  });
+  }
+  document.addEventListener('mouseup',  handleUp);
+  document.addEventListener('touchend', handleUp);
 
   // ── Mode toggle ───────────────────────────────────────────────────────────
   document.getElementById('btn-view-mode')?.addEventListener('click', () => {

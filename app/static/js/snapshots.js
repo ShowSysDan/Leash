@@ -247,6 +247,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const resp = await fetch(`/api/snapshots/${btn.dataset.snapId}`, { method: 'DELETE' });
       if (resp.ok) {
         document.getElementById(`snap-row-${btn.dataset.snapId}`)?.remove();
+        document.getElementById(`snap-card-${btn.dataset.snapId}`)?.remove();
         window.Leash.toast('Snapshot deleted', 'warning');
       }
     });

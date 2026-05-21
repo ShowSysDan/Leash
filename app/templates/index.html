@@ -2,7 +2,7 @@
 {% block title %}Receivers — Leash NDI Source Control{% endblock %}
 
 {% block content %}
-<div class="d-flex align-items-center mb-3 gap-3 flex-wrap">
+<div class="d-flex align-items-center mb-2 gap-3 flex-wrap">
   <h4 class="mb-0 text-light">
     NDI Receivers
     <span class="badge bg-secondary ms-1" id="total-count">{{ receivers|length }}</span>
@@ -23,6 +23,26 @@
   </div>
 </div>
 
+{% if receivers %}
+<div class="receiver-search-bar">
+  <div class="input-group">
+    <span class="input-group-text"><i class="bi bi-search"></i></span>
+    <input id="receiver-search" type="search" class="form-control"
+           placeholder="Filter by hostname or IP last octet…"
+           autocomplete="off" inputmode="search" aria-label="Filter receivers">
+    <button type="button" class="btn btn-outline-secondary" id="receiver-search-clear"
+            style="display:none" aria-label="Clear search">
+      <i class="bi bi-x-lg"></i>
+    </button>
+    <span class="input-group-text small text-muted" id="receiver-search-count"
+          style="display:none">0 / 0</span>
+  </div>
+  <div id="receiver-search-empty" class="text-muted small text-center py-3" style="display:none">
+    <i class="bi bi-search me-1"></i>No receivers match your filter.
+  </div>
+</div>
+{% endif %}
+
 {% if not receivers %}
 <div class="alert alert-secondary text-center py-5">
   <i class="bi bi-wifi-off display-4 d-block mb-3"></i>
@@ -33,7 +53,9 @@
 {% else %}
 <div id="receivers-grid" class="row row-cols-1 row-cols-md-2 row-cols-xl-3 row-cols-xxl-4 g-3">
   {% for r in receivers %}
-  <div class="col receiver-col {% if r.status == 'offline' %}col-offline{% endif %}" id="col-{{ r.id }}">
+  <div class="col receiver-col {% if r.status == 'offline' %}col-offline{% endif %}"
+       id="col-{{ r.id }}"
+       data-search="{{ ((r.hostname or '') ~ ' ' ~ (r.label or '') ~ ' ' ~ (r.ip_address or '') ~ ' ' ~ ('.' ~ r.ip_last_octet|string if r.ip_last_octet is not none else ''))|lower }}">
     <div class="card h-100 receiver-card border-{{ 'success' if r.status == 'online' else 'danger' if r.status == 'offline' else 'secondary' }}"
          data-receiver-id="{{ r.id }}">
       <div class="card-header d-flex align-items-center gap-2 py-2">
@@ -107,7 +129,7 @@
 
 <!-- Add Receiver Modal -->
 <div class="modal fade" id="addReceiverModal" tabindex="-1">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-fullscreen-sm-down">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title">Add Receiver Manually</h5>
@@ -141,11 +163,33 @@
 window.LEASH = window.LEASH || {};
 window.LEASH.sources = {{ sources | map(attribute='name') | list | tojson }};
 
-// Show/hide offline toggle
-document.getElementById('show-offline').addEventListener('change', function() {
+// Show/hide offline toggle — uses a class so it composes with the search filter
+// (a card is visible only if neither hide-rule is set).
+function applyOfflineToggle() {
+  const show = document.getElementById('show-offline')?.checked ?? true;
   document.querySelectorAll('.col-offline').forEach(col => {
-    col.style.display = this.checked ? '' : 'none';
+    col.classList.toggle('col-offline-hidden', !show);
   });
+}
+document.getElementById('show-offline')?.addEventListener('change', applyOfflineToggle);
+applyOfflineToggle();
+
+// Inject the CSS rule for the offline-hidden class once (kept inline so it
+// stays alongside the toggle that owns it).
+(function () {
+  const style = document.createElement('style');
+  style.textContent = '.col-offline-hidden { display: none !important; }';
+  document.head.appendChild(style);
+})();
+
+// ── Receiver search filter ─────────────────────────────────────────────
+window.Leash?.attachReceiverSearch?.({
+  inputId:    'receiver-search',
+  clearBtnId: 'receiver-search-clear',
+  countElId:  'receiver-search-count',
+  emptyElId:  'receiver-search-empty',
+  itemSel:    '.receiver-col',
+  hiddenClass: 'col-search-hidden',
 });
 
 // Auto-refresh tiles every 15s so out-of-band source changes appear without

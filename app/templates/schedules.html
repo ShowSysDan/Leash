@@ -1,6 +1,83 @@
 {% extends "base.html" %}
 {% block title %}Schedules — Leash NDI Source Control{% endblock %}
 
+{% macro schedule_mobile_card(s, past=False) %}
+{% set mins_left = s.enforcement_minutes_remaining() %}
+<div class="mc-row {% if not s.enabled %}opacity-50{% endif %}{% if past %} past{% endif %}"
+     id="sched-card-{{ s.id }}">
+  <div class="mc-title">
+    {% if s.enabled %}
+    <i class="bi bi-check-circle-fill text-success"></i>
+    {% else %}
+    <i class="bi bi-pause-circle text-muted"></i>
+    {% endif %}
+    <span>{{ s.name }}</span>
+  </div>
+  <div class="mc-meta">
+    {% if s.snapshot %}
+    <span class="badge bg-dark border border-secondary">
+      <i class="bi bi-camera me-1"></i>{{ s.snapshot.name }}
+    </span>
+    {% else %}
+    <span class="text-danger small"><i class="bi bi-exclamation-triangle me-1"></i>Snapshot deleted</span>
+    {% endif %}
+    <span class="font-monospace"><i class="bi bi-clock me-1"></i>{{ s.time_of_day }}</span>
+    <span>
+      {% for day in s.day_labels() %}<span class="badge bg-secondary me-1">{{ day }}</span>{% endfor %}
+    </span>
+    {% if s.persistent %}
+    <span class="text-success">
+      {% if mins_left is not none %}
+      <i class="bi bi-shield-check me-1"></i>{{ mins_left }} min left
+      {% else %}
+      <i class="bi bi-shield me-1"></i>{{ s.persist_minutes }} min enforce
+      {% endif %}
+    </span>
+    {% endif %}
+    {% if s.last_run %}
+    <span class="text-muted">
+      Last: {{ s.last_run.strftime('%m/%d %H:%M') }}
+      {% if s.last_result %}· {{ s.last_result }}{% endif %}
+    </span>
+    {% endif %}
+  </div>
+  <div class="mc-actions">
+    <button class="btn btn-sm {% if s.enabled %}btn-success{% else %}btn-outline-secondary{% endif %} btn-toggle-sched"
+            data-sched-id="{{ s.id }}">
+      <i class="bi bi-{% if s.enabled %}check-circle-fill{% else %}pause-circle{% endif %} me-1"></i>
+      {% if s.enabled %}On{% else %}Off{% endif %}
+    </button>
+    {% if s.persistent and mins_left is not none %}
+    <button class="btn btn-sm btn-outline-warning btn-stop-enforcement" data-sched-id="{{ s.id }}">
+      <i class="bi bi-stop-circle me-1"></i>Stop
+    </button>
+    {% endif %}
+    <button class="btn btn-sm btn-outline-secondary btn-edit-sched"
+            data-sched-id="{{ s.id }}"
+            data-name="{{ s.name }}"
+            data-snapshot-id="{{ s.snapshot_id or '' }}"
+            data-mode="{{ s.schedule_mode or 'weekly' }}"
+            data-days="{{ s.days_of_week }}"
+            data-run-date="{{ s.run_date.isoformat() if s.run_date else '' }}"
+            data-end-date="{{ s.end_date.isoformat() if s.end_date else '' }}"
+            data-time="{{ s.time_of_day }}"
+            data-enabled="{{ 'true' if s.enabled else 'false' }}"
+            data-persistent="{{ 'true' if s.persistent else 'false' }}"
+            data-persist-minutes="{{ s.persist_minutes }}">
+      <i class="bi bi-pencil"></i>
+    </button>
+    <button class="btn btn-sm btn-outline-info btn-duplicate-sched"
+            data-sched-id="{{ s.id }}" data-sched-name="{{ s.name }}">
+      <i class="bi bi-files"></i>
+    </button>
+    <button class="btn btn-sm btn-outline-danger btn-delete-sched"
+            data-sched-id="{{ s.id }}" data-sched-name="{{ s.name }}">
+      <i class="bi bi-trash"></i>
+    </button>
+  </div>
+</div>
+{% endmacro %}
+
 {% macro schedule_row(s, past=False) %}
 {% set mins_left = s.enforcement_minutes_remaining() %}
 <tr id="sched-row-{{ s.id }}" class="{% if not s.enabled %}opacity-50{% endif %}{% if past %} past-schedule-row{% endif %}">
@@ -134,7 +211,7 @@
 {% endif %}
 
 {% if schedules %}
-<div class="table-responsive">
+<div class="table-responsive d-md-block">
   <table class="table table-dark table-hover align-middle">
     <thead>
       <tr>
@@ -153,6 +230,9 @@
     </tbody>
   </table>
 </div>
+<div class="mobile-card-list" id="schedules-mobile-list">
+  {% for s in schedules %}{{ schedule_mobile_card(s) }}{% endfor %}
+</div>
 {% else %}
 <div class="alert alert-secondary py-3 small mb-0">
   <i class="bi bi-info-circle me-1"></i>No active schedules. All schedules below have already fired and are archived.
@@ -161,7 +241,7 @@
 
 {% if past_schedules %}
 <div id="past-schedules-wrap" class="mt-3" style="display:none">
-  <div class="table-responsive">
+  <div class="table-responsive d-md-block">
     <table class="table table-dark table-hover align-middle opacity-75">
       <thead>
         <tr>
@@ -179,6 +259,9 @@
         {% for s in past_schedules %}{{ schedule_row(s, past=True) }}{% endfor %}
       </tbody>
     </table>
+  </div>
+  <div class="mobile-card-list" id="past-schedules-mobile-list">
+    {% for s in past_schedules %}{{ schedule_mobile_card(s, past=True) }}{% endfor %}
   </div>
 </div>
 {% endif %}
@@ -231,7 +314,7 @@
 
 <!-- Add / Edit Schedule Modal -->
 <div class="modal fade" id="scheduleModal" tabindex="-1">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-fullscreen-sm-down">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="schedule-modal-title">Add Schedule</h5>

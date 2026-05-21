@@ -4,7 +4,7 @@ Flask/Python application that centrally controls a network of **BirdDog NDI PLAY
 Replaces a QSYS Lua script as the single routing control point for up to 254 receivers on a shared subnet.
 SQLite for development, PostgreSQL-ready for production.
 
-Current version: **1.0.0**
+Current version: **1.1.0**
 
 ---
 
@@ -21,6 +21,9 @@ Current version: **1.0.0**
 | **Schedules** | Cron-like automation — recall a snapshot on selected days at a set time |
 | **Persistent enforcement** | After a scheduled recall, poll receivers and correct any source drift for a configurable window |
 | **External API** | `/api/v1/` for QSYS, Crestron, AMX — route by stable index or source name |
+| **Operator view** | Mobile-first `/operator` page with bottom-tab navigation for control on the move |
+| **Receiver search** | Sticky filter bar on the dashboard — type any hostname fragment or IP last octet |
+| **Responsive UI** | Tables collapse to card lists on phone, touch-friendly canvas drag, full-screen modals |
 | **Syslog audit log** | Every source change, discovery, scan, and device error written to syslog |
 | **Auto-migrations** | DB schema is always current on startup — no manual migration commands needed |
 
@@ -50,15 +53,17 @@ Leash/
 │   ├── static/
 │   │   ├── css/style.css
 │   │   └── js/
-│   │       ├── main.js          # Shared: toast, scan, discover, reload
+│   │       ├── main.js          # Shared: toast, scan, discover, reload, search filter, mobile suggest
+│   │       ├── operator.js      # Operator view — tabs, recall, group send, auto-refresh
 │   │       ├── groups.js
-│   │       ├── layout.js
+│   │       ├── layout.js        # Canvas drag (mouse + touch)
 │   │       ├── snapshots.js
 │   │       ├── schedules.js
 │   │       └── receiver_detail.js
 │   └── templates/
 │       ├── base.html
 │       ├── index.html
+│       ├── operator.html        # Mobile-first control surface (/operator)
 │       ├── receiver_detail.html
 │       ├── groups.html
 │       ├── layouts.html
@@ -191,6 +196,48 @@ the schema on first startup.
 | `RECALL_CONCURRENCY` | `10` | Max simultaneous device contacts during recalls and enforcement corrections |
 | `ENFORCEMENT_INTERVAL` | `60` | How often (seconds) the enforcement poller checks active persistence windows |
 | `API_KEY` | _(unset)_ | External API key for `/api/v1/`; leave unset for open LAN access |
+
+---
+
+## Mobile / Operator View
+
+Leash is designed to be usable from a phone while walking the venue.
+
+### `/operator` — streamlined mobile control surface
+
+A dedicated page with bottom-tab navigation built for one-handed thumb use:
+
+| Tab | What you can do |
+|---|---|
+| **Receivers** | Sticky search bar (filters by hostname or IP last octet), live receiver list with full-width source dropdowns, show/hide offline toggle |
+| **Snapshots** | One-tap recall — applies a saved routing to every online receiver and reports succeeded / attempted |
+| **Groups** | Pick a source, tap send — pushes it to every online member of the group |
+| **PTZ** | Quick links into the per-camera control page (only shown when cameras are enabled) |
+
+State auto-refreshes every 20 seconds while the tab is in the foreground.
+The page suggests itself once via a dismissable banner the first time a
+mobile user lands on a normal page — it never force-redirects.
+
+### Receiver search on the main dashboard
+
+Above the receivers grid on `/`, a search input filters cards client-side
+as you type. Matches against hostname and IP last octet from one box:
+
+- Typing `83` highlights `.83` devices
+- Typing `lobby` shows every card whose hostname contains "lobby"
+- Sticky to the top of the viewport on phones, inline on desktop
+
+### Responsive UI
+
+- Schedule and snapshot tables collapse into touch-friendly card lists
+  below the `md` breakpoint, with desktop tables unchanged
+- Layouts list shows up/down reorder buttons on phone (HTML5 drag doesn't
+  work on touch); same persistence as the desktop drag
+- Layout canvas supports both mouse and touch drag for repositioning
+- Modals that carry lots of fields (Capture, Schedule, Add Receivers to
+  Layout, Manage Members, Scan Results) become fullscreen on phones
+- All small action buttons hit ≥38 px tap targets on phone; selects bump
+  to 16 px to stop iOS from zooming on focus
 
 ---
 

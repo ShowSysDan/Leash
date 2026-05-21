@@ -407,9 +407,93 @@ window.Leash = (() => {
     });
   }
 
+  // ── Reusable client-side search filter ──────────────────────────────────
+  // Attaches a debounced input handler that toggles a hidden-class on each
+  // matched element. Search text comes from each item's data-search attr
+  // (set server-side), falling back to its textContent.
+  function attachReceiverSearch(opts) {
+    const {
+      inputId, clearBtnId, countElId, emptyElId,
+      itemSel, hiddenClass = 'col-search-hidden',
+    } = opts;
+    const input  = document.getElementById(inputId);
+    if (!input) return;
+    const clear  = clearBtnId ? document.getElementById(clearBtnId) : null;
+    const countEl = countElId ? document.getElementById(countElId) : null;
+    const emptyEl = emptyElId ? document.getElementById(emptyElId) : null;
+
+    function apply() {
+      const q = (input.value || '').trim().toLowerCase();
+      const items = document.querySelectorAll(itemSel);
+      let visible = 0;
+      items.forEach(el => {
+        if (!q) {
+          el.classList.remove(hiddenClass);
+          visible++;
+          return;
+        }
+        const hay = (el.dataset.search || el.textContent || '').toLowerCase();
+        const match = hay.includes(q);
+        el.classList.toggle(hiddenClass, !match);
+        if (match) visible++;
+      });
+      if (clear) clear.style.display = q ? '' : 'none';
+      if (countEl) {
+        if (q) {
+          countEl.textContent = `${visible} / ${items.length}`;
+          countEl.style.display = '';
+        } else {
+          countEl.style.display = 'none';
+        }
+      }
+      if (emptyEl) emptyEl.style.display = (q && visible === 0) ? '' : 'none';
+    }
+
+    let debounce;
+    input.addEventListener('input', () => {
+      clearTimeout(debounce);
+      debounce = setTimeout(apply, 80);
+    });
+    // 'search' fires when the clear button in the type=search field is clicked
+    input.addEventListener('search', apply);
+    clear?.addEventListener('click', () => {
+      input.value = '';
+      apply();
+      input.focus();
+    });
+    apply();
+    return apply;
+  }
+
+  // ── Operator-view suggestion banner ─────────────────────────────────────
+  // Shows a one-time hint on phones offering the streamlined /operator UI.
+  // Never auto-redirects — operators sometimes want the full desktop UI.
+  function maybeSuggestOperatorView() {
+    const banner = document.getElementById('operator-suggest-banner');
+    if (!banner) return;
+
+    const onMobile = window.matchMedia('(max-width: 767.98px)').matches
+                  && ('ontouchstart' in window || navigator.maxTouchPoints > 0);
+    const dismissed = (() => {
+      try { return localStorage.getItem('leash-operator-suggest-dismissed') === '1'; }
+      catch (_e) { return false; }
+    })();
+    const onOperator = (location.pathname || '').startsWith('/operator');
+
+    if (onMobile && !dismissed && !onOperator) {
+      banner.classList.add('is-visible');
+    }
+
+    banner.addEventListener('closed.bs.alert', () => {
+      try { localStorage.setItem('leash-operator-suggest-dismissed', '1'); }
+      catch (_e) { /* private mode — banner just reappears next time */ }
+    });
+  }
+
   // ── Bind dashboard events ────────────────────────────────────────────────
   function bindDashboard() {
     initTooltips();
+    maybeSuggestOperatorView();
     document.getElementById('btn-scan')?.addEventListener('click', scanNetwork);
     document.getElementById('btn-bulk-reload')?.addEventListener('click', bulkReload);
     document.getElementById('btn-discover')?.addEventListener('click', discoverSources);
@@ -439,6 +523,6 @@ window.Leash = (() => {
   return {
     toast, pollReceiver, bulkReload, silentRefresh, scanNetwork,
     discoverSources, setSource, rebootReceiver, rebootAll, restartReceiver,
-    removeReceiver,
+    removeReceiver, attachReceiverSearch,
   };
 })();

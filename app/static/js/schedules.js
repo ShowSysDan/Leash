@@ -361,6 +361,29 @@
 
   // ── row-level actions ──────────────────────────────────────────────────────
 
+  // Patch the mobile card after a server-side change. The mobile cards mirror
+  // a subset of the row info — we only need to flip the enabled-state visuals
+  // and toggle the stop-enforcement button.
+  function patchMobileCard(s) {
+    const card = document.getElementById(`sched-card-${s.id}`);
+    if (!card) return;
+    card.classList.toggle('opacity-50', !s.enabled);
+    const title = card.querySelector('.mc-title i');
+    if (title) {
+      title.className = s.enabled
+        ? 'bi bi-check-circle-fill text-success'
+        : 'bi bi-pause-circle text-muted';
+    }
+    const toggleBtn = card.querySelector('.btn-toggle-sched');
+    if (toggleBtn) {
+      toggleBtn.classList.toggle('btn-success',           s.enabled);
+      toggleBtn.classList.toggle('btn-outline-secondary', !s.enabled);
+      toggleBtn.innerHTML = s.enabled
+        ? '<i class="bi bi-check-circle-fill me-1"></i>On'
+        : '<i class="bi bi-pause-circle me-1"></i>Off';
+    }
+  }
+
   function bindRowActions(root) {
     root.querySelector('.btn-toggle-sched')?.addEventListener('click', async function () {
       const id   = this.dataset.schedId;
@@ -368,6 +391,7 @@
       const data = await resp.json();
       if (resp.ok) {
         renderRow(data);
+        patchMobileCard(data);
         window.Leash.toast(data.enabled ? 'Schedule enabled' : 'Schedule disabled', 'info');
       }
     });
@@ -398,6 +422,7 @@
       const resp = await fetch(`/api/schedules/${id}`, { method: 'DELETE' });
       if (resp.ok) {
         document.getElementById(`sched-row-${id}`)?.remove();
+        document.getElementById(`sched-card-${id}`)?.remove();
         window.Leash.toast('Schedule deleted', 'warning');
       }
     });
@@ -408,13 +433,17 @@
       const data = await resp.json();
       if (resp.ok) {
         renderRow(data);
+        patchMobileCard(data);
         window.Leash.toast('Enforcement stopped', 'warning');
       }
     });
   }
 
-  // Bind actions on server-rendered rows (active + past tables)
-  document.querySelectorAll('#schedules-table-body tr, #past-schedules-table-body tr').forEach(bindRowActions);
+  // Bind actions on server-rendered rows (active + past tables AND the mobile card list)
+  document.querySelectorAll(
+    '#schedules-table-body tr, #past-schedules-table-body tr, ' +
+    '#schedules-mobile-list .mc-row, #past-schedules-mobile-list .mc-row'
+  ).forEach(bindRowActions);
 
   // ── Past-schedules toggle ──────────────────────────────────────────────────
 

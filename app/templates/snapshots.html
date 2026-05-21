@@ -24,7 +24,7 @@
   No snapshots yet. Use <strong>Capture State</strong> to save the current routing.
 </div>
 {% else %}
-<div class="table-responsive">
+<div class="table-responsive d-md-block">
   <table class="table table-dark table-hover align-middle">
     <thead>
       <tr>
@@ -68,11 +68,42 @@
     </tbody>
   </table>
 </div>
+<div class="mobile-card-list" id="snapshots-mobile-list">
+  {% for snap in snapshots %}
+  <div class="mc-row" id="snap-card-{{ snap.id }}">
+    <div class="mc-title">
+      <i class="bi bi-camera text-info"></i>
+      <span>{{ snap.name }}</span>
+    </div>
+    <div class="mc-meta">
+      <span><i class="bi bi-broadcast-pin me-1"></i>{{ snap.entry_count }} receivers</span>
+      <span class="text-muted">{{ snap.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+      {% if snap.description %}
+      <span class="text-muted">{{ snap.description }}</span>
+      {% endif %}
+    </div>
+    <div class="mc-actions">
+      <button class="btn btn-sm btn-success btn-recall-snap"
+              data-snap-id="{{ snap.id }}" data-snap-name="{{ snap.name }}">
+        <i class="bi bi-play-fill me-1"></i>Recall
+      </button>
+      <button class="btn btn-sm btn-outline-info btn-preview-snap"
+              data-snap-id="{{ snap.id }}" data-snap-name="{{ snap.name }}">
+        <i class="bi bi-eye"></i>
+      </button>
+      <button class="btn btn-sm btn-outline-danger btn-delete-snap"
+              data-snap-id="{{ snap.id }}" data-snap-name="{{ snap.name }}">
+        <i class="bi bi-trash"></i>
+      </button>
+    </div>
+  </div>
+  {% endfor %}
+</div>
 {% endif %}
 
 <!-- Capture Modal -->
 <div class="modal fade" id="captureModal" tabindex="-1">
-  <div class="modal-dialog modal-lg">
+  <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title"><i class="bi bi-camera me-2"></i>Capture Snapshot</h5>
@@ -150,7 +181,7 @@
 
 <!-- Preview / Recall Modal -->
 <div class="modal fade" id="previewSnapModal" tabindex="-1">
-  <div class="modal-dialog modal-lg">
+  <div class="modal-dialog modal-lg modal-fullscreen-sm-down">
     <div class="modal-content">
       <div class="modal-header">
         <h5 class="modal-title" id="preview-snap-title">Snapshot Preview</h5>
