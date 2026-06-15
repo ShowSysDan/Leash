@@ -33,7 +33,7 @@ from app.extensions import limiter
 from app.services.auth_service import (
     dummy_password_check,
     get_user_by_username,
-    refresh_user_role,
+    refresh_user_flags,
 )
 from app.services.session_service import rotate_sid
 
@@ -41,7 +41,15 @@ auth_bp = Blueprint("auth", __name__)
 logger = logging.getLogger(__name__)
 
 _PUBLIC_ENDPOINTS = frozenset({"auth.login", "auth.login_post", "auth.logout", "static"})
-_ALLOWED_ROLES = frozenset({"admin", "staff"})
+
+# Access is gated by two independent per-user flags on the shared users table:
+#   * is_app_user  — the login gate; any account with this set may log in.
+#   * is_app_admin — marks an administrator of the shared app. Captured into
+#                    the session and exposed via admin_required / templates so
+#                    individual pages can be locked down to admins. The two
+#                    flags are independent (no "admin implies user"), so an
+#                    account needs is_app_user to log in *and* is_app_admin to
+#                    reach anything guarded by admin_required.
 
 # State-changing methods that must carry a non-simple Content-Type so the
 # browser is forced into a CORS preflight (which we don't allow) before the
@@ -84,7 +92,8 @@ def _populate_session(user: dict) -> None:
     session["logged_in"] = True
     session["user_id"] = user["id"]
     session["username"] = user["username"]
-    session["role"] = user["role"]
+    session["is_app_user"] = bool(user.get("is_app_user"))
+    session["is_app_admin"] = bool(user.get("is_app_admin"))
     session["display_name"] = user.get("display_name") or user["username"]
     session["must_change_password"] = bool(user.get("must_change_password"))
     session["login_time"] = datetime.utcnow().isoformat()
@@ -94,18 +103,20 @@ def _populate_session(user: dict) -> None:
     session["_csrf_token"] = secrets.token_hex(32)
 
 
-def _do_role_refresh() -> None:
+def _do_flag_refresh() -> None:
     user_id = session.get("user_id")
     if not user_id:
         session.clear()
         return
 
-    info = refresh_user_role(int(user_id))
-    if info is None or info.get("role") not in _ALLOWED_ROLES:
+    info = refresh_user_flags(int(user_id))
+    # Drop the session if the account vanished or lost its is_app_user flag.
+    if info is None or not info.get("is_app_user"):
         session.clear()
         return
 
-    session["role"] = info["role"]
+    session["is_app_user"] = bool(info.get("is_app_user"))
+    session["is_app_admin"] = bool(info.get("is_app_admin"))
     session["must_change_password"] = bool(info.get("must_change_password"))
     session["last_role_refresh"] = datetime.utcnow().isoformat()
 
@@ -126,10 +137,10 @@ def login_required(f):
 
 
 def admin_required(f):
-    """Require admin role; also enforces login via login_required."""
+    """Require the is_app_admin flag; also enforces login via login_required."""
     @wraps(f)
     def _admin_check(*args, **kwargs):
-        if _auth_enabled() and session.get("role") != "admin":
+        if _auth_enabled() and not session.get("is_app_admin"):
             if request.is_json:
                 return jsonify({"error": "Admin access required"}), 403
             flash("You need admin access to do that.", "danger")
@@ -154,12 +165,13 @@ def _register_before_request(app) -> None:
                 return jsonify({"error": "Authentication required"}), 401
             return _redirect_to_login()
 
-        # Re-query role every 5 minutes; clear session if user gone or demoted
+        # Re-query the access flags every 5 minutes; clear the session if the
+        # user is gone or has lost the is_app_user flag.
         last_str = session.get("last_role_refresh")
         if last_str:
             try:
                 if datetime.utcnow() - datetime.fromisoformat(last_str) > timedelta(minutes=5):
-                    _do_role_refresh()
+                    _do_flag_refresh()
                     if not session.get("logged_in"):
                         if request.is_json:
                             return jsonify({"error": "Session expired"}), 401
@@ -171,7 +183,8 @@ def _register_before_request(app) -> None:
             "id": session.get("user_id"),
             "username": session.get("username"),
             "display_name": session.get("display_name"),
-            "role": session.get("role"),
+            "is_app_user": bool(session.get("is_app_user")),
+            "is_app_admin": bool(session.get("is_app_admin")),
             "must_change_password": session.get("must_change_password", False),
         }
 
@@ -261,13 +274,15 @@ def login_post():
         logger.warning("auth: bad password for user %r from %s", username, request.remote_addr)
         return fail("Invalid username or password.")
 
-    role = user.get("role", "")
-    if role not in _ALLOWED_ROLES:
-        logger.warning("auth: login denied for user %r (role=%r) — not staff or admin", username, role)
+    if not user.get("is_app_user"):
+        logger.warning("auth: login denied for user %r — is_app_user flag not set", username)
         return fail("Your account does not have access to Leash.", 403)
 
     _populate_session(user)
-    logger.info("auth: user %r (role=%r) logged in from %s", username, role, request.remote_addr)
+    logger.info(
+        "auth: user %r logged in from %s (admin=%s)",
+        username, request.remote_addr, bool(user.get("is_app_admin")),
+    )
 
     if next_url and next_url.startswith("/") and not next_url.startswith("//"):
         return redirect(next_url)

@@ -6,6 +6,33 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.0] — 2026-06-15
+
+Switch login access control from the legacy `role` column to the shared
+cross-app user flags.
+
+### Changed
+- Login is now gated on the shared `users.is_app_user` flag instead of
+  `role in ('admin', 'staff')`. Any account with `is_app_user = 1` may log
+  in to Leash; the `role` column is no longer consulted.
+- `admin_required` (and the navbar "Admin" badge) now key off the
+  `users.is_app_admin` flag instead of `role == 'admin'`. The two flags are
+  independent, so an administrator needs **both** `is_app_user` (to log in)
+  and `is_app_admin` (to reach admin-only features).
+- The periodic 5-minute session re-check now re-reads both flags and ends the
+  session if `is_app_user` has been revoked.
+- App version → `1.2.0`
+
+### Notes
+- `is_app_admin` is captured into the session and exposed to templates
+  (`current_user.is_app_admin`) so more pages can be locked down to admins in
+  a future release.
+- Requires the shared `users` table to expose the `is_app_user` and
+  `is_app_admin` INTEGER (0/1) columns. These are written by the sibling
+  321Theater app; Leash only reads them.
+
+---
+
 ## [1.1.0] — 2026-05-21
 
 Mobile-friendly responsive UI pass + dedicated operator surface.
