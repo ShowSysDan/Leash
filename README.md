@@ -4,7 +4,7 @@ Flask/Python application that centrally controls a network of **BirdDog NDI PLAY
 Replaces a QSYS Lua script as the single routing control point for up to 254 receivers on a shared subnet.
 SQLite for development, PostgreSQL-ready for production.
 
-Current version: **1.1.0**
+Current version: **1.2.0**
 
 ---
 
@@ -196,6 +196,28 @@ the schema on first startup.
 | `RECALL_CONCURRENCY` | `10` | Max simultaneous device contacts during recalls and enforcement corrections |
 | `ENFORCEMENT_INTERVAL` | `60` | How often (seconds) the enforcement poller checks active persistence windows |
 | `API_KEY` | _(unset)_ | External API key for `/api/v1/`; leave unset for open LAN access |
+| `AUTH_DB_SCHEMA` | _(unset)_ | Postgres schema holding the shared `users` table. Set it to require login; leave unset to run with no login screen (dev/SQLite). |
+| `AUTH_FORGOT_PASSWORD_URL` | _(unset)_ | External password-change URL shown on the login page; also settable in the Settings UI |
+
+---
+
+## Authentication
+
+Set `AUTH_DB_SCHEMA` to the Postgres schema that holds the shared `users`
+table to require login (leave it unset for an open dev/SQLite instance).
+Access is gated by two independent per-user flags on that table, both
+`INTEGER 0/1` and read-only from Leash's side (the sibling 321Theater app
+owns writing them):
+
+| Flag | Effect in Leash |
+|---|---|
+| `is_app_user` | **Login gate** — any account with this set to `1` may log in. |
+| `is_app_admin` | Marks an administrator; required for admin-only features (e.g. the Settings APIs) and shows the "Admin" badge. |
+
+The flags are independent — there is no "admin implies user", so an
+administrator needs **both** `is_app_user` (to log in) and `is_app_admin`.
+Leash re-checks them roughly every 5 minutes and ends the session if
+`is_app_user` is revoked.
 
 ---
 
@@ -439,6 +461,15 @@ Each source-change entry includes a `via=` tag:
 | `v1` | External API single route |
 | `v1_bulk` | External API bulk route |
 | `enforcement` | Persistent enforcement correction |
+
+Every audit event also carries an `actor=` field naming who triggered it:
+
+| Actor | Meaning |
+|---|---|
+| `<username>` | The logged-in user who performed the action through the web UI |
+| `api` | A call authenticated by the external `/api/v1` API key |
+| `system` | A background job (receiver polling, enforcement, source sync) |
+| `anonymous` | An unauthenticated request (auth disabled, or before login) |
 
 Filter Leash audit events:
 

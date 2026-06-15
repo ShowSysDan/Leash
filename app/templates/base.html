@@ -104,7 +104,7 @@
                   type="button" data-bs-toggle="dropdown">
             <i class="bi bi-person-circle"></i>
             <span class="d-none d-md-inline">{{ current_user.get('display_name') or current_user.get('username') }}</span>
-            {% if current_user.get('role') == 'admin' %}
+            {% if current_user.get('is_app_admin') %}
             <span class="badge bg-warning text-dark ms-1" style="font-size:0.6em">Admin</span>
             {% endif %}
           </button>
