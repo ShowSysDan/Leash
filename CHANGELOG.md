@@ -11,6 +11,13 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 Switch login access control from the legacy `role` column to the shared
 cross-app user flags.
 
+### Added
+- Audit/syslog events now carry an `actor=<who>` field so every logged action
+  is attributable: the logged-in username for web-UI actions, `api` for
+  external `/api/v1` (API-key) calls, and `system` for background jobs
+  (polling, enforcement, source sync). Resolved automatically from the request
+  context — no behavioural change to what triggers each event.
+
 ### Changed
 - Login is now gated on the shared `users.is_app_user` flag instead of
   `role in ('admin', 'staff')`. Any account with `is_app_user = 1` may log

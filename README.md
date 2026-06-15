@@ -462,6 +462,15 @@ Each source-change entry includes a `via=` tag:
 | `v1_bulk` | External API bulk route |
 | `enforcement` | Persistent enforcement correction |
 
+Every audit event also carries an `actor=` field naming who triggered it:
+
+| Actor | Meaning |
+|---|---|
+| `<username>` | The logged-in user who performed the action through the web UI |
+| `api` | A call authenticated by the external `/api/v1` API key |
+| `system` | A background job (receiver polling, enforcement, source sync) |
+| `anonymous` | An unauthenticated request (auth disabled, or before login) |
+
 Filter Leash audit events:
 
 ```bash
