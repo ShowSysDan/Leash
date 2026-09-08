@@ -4,7 +4,7 @@ Flask/Python application that centrally controls a network of **BirdDog NDI PLAY
 Replaces a QSYS Lua script as the single routing control point for up to 254 receivers on a shared subnet.
 SQLite for development, PostgreSQL-ready for production.
 
-Current version: **1.2.0**
+Current version: **1.3.0**
 
 ---
 
@@ -368,6 +368,9 @@ Body (optional): `{"start": 1, "end": 254}`
 | GET | `/api/snapshots/<id>` | Get snapshot with all entries |
 | POST | `/api/snapshots/<id>/recall` | Recall — pass `{"receiver_ids":[1,2]}` to restore only a subset, omit for all |
 | DELETE | `/api/snapshots/<id>` | Delete |
+| PATCH | `/api/snapshots/<id>/entries/<entry_id>` | Update one entry's saved source `{"source_name":"..."}` |
+| PATCH | `/api/snapshots/<id>/entries` | Bulk-update saved source `{"entry_ids":[1,2],"source_name":"..."}` |
+| DELETE | `/api/snapshots/<id>/entries` | Remove receivers from snapshot `{"entry_ids":[1,2]}` |
 
 #### Schedules
 

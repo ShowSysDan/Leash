@@ -12,6 +12,11 @@ GET    /api/snapshots/<id>                  get snapshot with entries
 POST   /api/snapshots/<id>/recall           apply snapshot to devices concurrently
                                             body: {"receiver_ids":[1,2]}  (optional subset)
 DELETE /api/snapshots/<id>                  delete snapshot
+PATCH  /api/snapshots/<id>/entries/<eid>    update one entry's saved source
+PATCH  /api/snapshots/<id>/entries          bulk-update saved source on entries
+                                            body: {"entry_ids":[1,2], "source_name":"..."}
+DELETE /api/snapshots/<id>/entries          remove entries (receivers) from snapshot
+                                            body: {"entry_ids":[1,2]}
 """
 import asyncio
 from datetime import datetime
@@ -179,3 +184,64 @@ def update_entry(snap_id: int, entry_id: int):
     entry.source_name = str(body.get("source_name", "")).strip()
     db.session.commit()
     return jsonify(entry.to_dict())
+
+
+def _entries_from_body(snap_id: int, body: dict):
+    """Resolve body['entry_ids'] to this snapshot's entries, or an error response."""
+    raw_ids = body.get("entry_ids")
+    if not isinstance(raw_ids, list) or not raw_ids:
+        return None, _err("entry_ids is required (non-empty list)")
+    try:
+        entry_ids = [int(i) for i in raw_ids]
+    except (TypeError, ValueError):
+        return None, _err("entry_ids must be a list of integers")
+
+    entries = SnapshotEntry.query.filter(
+        SnapshotEntry.snapshot_id == snap_id,
+        SnapshotEntry.id.in_(entry_ids),
+    ).all()
+    missing = set(entry_ids) - {e.id for e in entries}
+    if missing:
+        return None, _err(f"Unknown entry ids: {sorted(missing)}")
+    return entries, None
+
+
+@snapshots_api_bp.route("/snapshots/<int:snap_id>/entries", methods=["PATCH"])
+def bulk_update_entries(snap_id: int):
+    """Set the same saved source_name on multiple snapshot entries at once."""
+    snap = Snapshot.query.get_or_404(snap_id)
+    body = request.get_json(silent=True) or {}
+    entries, error = _entries_from_body(snap_id, body)
+    if error:
+        return error
+
+    source_name = str(body.get("source_name", "")).strip()
+    for entry in entries:
+        entry.source_name = source_name
+    db.session.commit()
+
+    return jsonify({
+        "snapshot": snap.name,
+        "updated": [e.to_dict() for e in entries],
+    })
+
+
+@snapshots_api_bp.route("/snapshots/<int:snap_id>/entries", methods=["DELETE"])
+def bulk_delete_entries(snap_id: int):
+    """Remove receivers (entries) from a snapshot."""
+    snap = Snapshot.query.get_or_404(snap_id)
+    body = request.get_json(silent=True) or {}
+    entries, error = _entries_from_body(snap_id, body)
+    if error:
+        return error
+
+    deleted_ids = [e.id for e in entries]
+    for entry in entries:
+        db.session.delete(entry)
+    db.session.commit()
+
+    return jsonify({
+        "snapshot": snap.name,
+        "deleted": deleted_ids,
+        "entry_count": len(snap.entries),
+    })
