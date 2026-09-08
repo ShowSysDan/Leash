@@ -6,6 +6,29 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.3.0] — 2026-09-08
+
+Bulk editing inside the snapshot preview.
+
+### Added
+- Snapshot preview (eye icon) now has a checkbox on every row plus a
+  select-all header checkbox. A toolbar above the table applies a new saved
+  source to **all selected receivers at once** — no more editing entries one
+  by one (the per-row pencil edit still works).
+- Receivers can now be **removed from a snapshot**: a trash button on each
+  preview row, and a bulk "Remove" button for the current selection. The
+  receiver-count badge on the snapshots list updates live.
+- New API endpoints:
+  - `PATCH /api/snapshots/<id>/entries` — bulk-update the saved source
+    (`{"entry_ids":[…], "source_name":"…"}`)
+  - `DELETE /api/snapshots/<id>/entries` — remove entries from a snapshot
+    (`{"entry_ids":[…]}`); response includes the updated `entry_count`
+
+### Changed
+- App version → `1.3.0`
+
+---
+
 ## [1.2.0] — 2026-06-15
 
 Switch login access control from the legacy `role` column to the shared
