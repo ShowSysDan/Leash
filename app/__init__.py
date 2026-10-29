@@ -132,6 +132,7 @@ def create_app(config_name: str = "default") -> Flask:
     from app.routes.external_api import v1_bp
     from app.routes.schedules_api import schedules_api_bp
     from app.routes.settings_api import settings_api_bp
+    from app.routes.project_api import project_api_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(main_bp)
@@ -143,6 +144,7 @@ def create_app(config_name: str = "default") -> Flask:
     app.register_blueprint(v1_bp, url_prefix="/api/v1")
     app.register_blueprint(schedules_api_bp, url_prefix="/api")
     app.register_blueprint(settings_api_bp, url_prefix="/api")
+    app.register_blueprint(project_api_bp, url_prefix="/api")
 
     from app.__version__ import __version__
     app.config["LEASH_VERSION"] = __version__

@@ -133,6 +133,12 @@ def init_scheduler(app) -> BackgroundScheduler:
     )
 
     _scheduler.start()
+
+    # Tractus projector cycling needs sub-second timing, so it runs on its
+    # own thread rather than as a (log-noisy) 1 s APScheduler job.
+    from app.services.projector import init_engine
+    init_engine(app)
+
     logger.info(
         "Leash scheduler: started (pid=%d, grace=%ds, enforcement=%ds, source_sync=%ds, recv_poll=%ds)",
         os.getpid(), SCHEDULE_GRACE_SECONDS, interval, source_interval, recv_interval,

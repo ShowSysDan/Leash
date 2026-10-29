@@ -1,6 +1,6 @@
 from flask import Blueprint, abort, current_app, render_template
 
-from app.models import NDIReceiver, NDISource, PTZCamera, ReceiverGroup, Layout, Snapshot, ScheduledRecall
+from app.models import NDIReceiver, NDISource, PTZCamera, ProjectCue, ReceiverGroup, Layout, Snapshot, ScheduledRecall
 from app.services.settings_service import SETTINGS_SCHEMA, all_settings_dicts
 
 main_bp = Blueprint("main", __name__)
@@ -112,6 +112,18 @@ def schedules():
         cameras=all_cameras,
         concurrency=current_app.config.get("RECALL_CONCURRENCY", 10),
         enforcement_interval=current_app.config.get("ENFORCEMENT_INTERVAL", 60),
+    )
+
+
+@main_bp.route("/project")
+def project():
+    """Tractus projector: live viewers, manual project, and the cue playlist."""
+    cues = ProjectCue.query.order_by(ProjectCue.sort_order, ProjectCue.name).all()
+    return render_template(
+        "project.html",
+        cues=cues,
+        sources=_online_sources(),
+        tractus_hosts=current_app.config.get("TRACTUS_MV_HOSTS") or [],
     )
 
 

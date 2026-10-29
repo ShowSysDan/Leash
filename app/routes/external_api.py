@@ -25,6 +25,17 @@ Endpoints
 
   POST /api/v1/route                Route one receiver to a source
   POST /api/v1/route/bulk           Route multiple receivers at once
+
+  Tractus projector cues (GET or POST — either works, so a show-control
+  system can fire a plain URL string).  <cue> is the cue's code, e.g.
+  "weather", or its numeric id.
+  GET       /api/v1/project/status                 engine state + active cues
+  GET       /api/v1/project/cues                   all cues
+  GET|POST  /api/v1/project/cues/<cue>/activate    ?duration=<s> auto-release,
+                                                   ?now=1 jump the rotation to it
+  GET|POST  /api/v1/project/cues/<cue>/deactivate
+  GET|POST  /api/v1/project/cues/<cue>/toggle
+  GET|POST  /api/v1/project/clear                  deactivate every cue
 """
 import asyncio
 import hmac
@@ -35,7 +46,7 @@ from functools import wraps
 from flask import Blueprint, current_app, jsonify, request
 
 from app import db
-from app.models import NDIReceiver, NDISource
+from app.models import NDIReceiver, NDISource, ProjectCue
 from app.services.audit_log import device_error, source_change_failed, source_changed
 from app.services.birddog_client import client_from_ip, run_async
 
@@ -330,3 +341,80 @@ def route_bulk():
         "errors": errors,
         "results": results,
     })
+
+
+# ---------------------------------------------------------------------------
+# Tractus projector cues
+# ---------------------------------------------------------------------------
+
+def _cue_params() -> dict:
+    """Merge query-string and JSON body so GET and POST callers both work."""
+    params = dict(request.args)
+    params.update(request.get_json(silent=True) or {})
+    return params
+
+
+def _cue_or_404(ref):
+    from app.routes.project_api import find_cue
+    cue = find_cue(ref)
+    if cue is None:
+        return None, (jsonify({"error": f"No project cue '{ref}'"}), 404)
+    return cue, None
+
+
+@v1_bp.route("/project/status", methods=["GET"])
+@require_api_key
+def project_status():
+    from app.routes.project_api import status_payload
+    return jsonify(status_payload())
+
+
+@v1_bp.route("/project/cues", methods=["GET"])
+@require_api_key
+def project_cues():
+    cues = ProjectCue.query.order_by(ProjectCue.sort_order, ProjectCue.name).all()
+    return jsonify({"count": len(cues), "cues": [c.to_dict() for c in cues]})
+
+
+@v1_bp.route("/project/cues/<ref>/activate", methods=["GET", "POST"])
+@require_api_key
+def project_activate(ref):
+    from app.routes.project_api import activate_from_request
+    cue, error = _cue_or_404(ref)
+    if error:
+        return error
+    return activate_from_request(cue, _cue_params(), via="v1")
+
+
+@v1_bp.route("/project/cues/<ref>/deactivate", methods=["GET", "POST"])
+@require_api_key
+def project_deactivate(ref):
+    from app.services import projector
+    cue, error = _cue_or_404(ref)
+    if error:
+        return error
+    projector.deactivate(cue, via="v1")
+    db.session.commit()
+    return jsonify(cue.to_dict())
+
+
+@v1_bp.route("/project/cues/<ref>/toggle", methods=["GET", "POST"])
+@require_api_key
+def project_toggle(ref):
+    from app.routes.project_api import activate_from_request
+    from app.services import projector
+    cue, error = _cue_or_404(ref)
+    if error:
+        return error
+    if not cue.active:
+        return activate_from_request(cue, _cue_params(), via="v1")
+    projector.deactivate(cue, via="v1")
+    db.session.commit()
+    return jsonify(cue.to_dict())
+
+
+@v1_bp.route("/project/clear", methods=["GET", "POST"])
+@require_api_key
+def project_clear():
+    from app.routes.project_api import clear_all
+    return jsonify({"deactivated": clear_all(via="v1")})
