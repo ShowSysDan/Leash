@@ -6,6 +6,43 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.4.0] — 2026-10-29
+
+Tractus Project: overlay a source on top of Tractus MV viewer outputs, manually,
+on a timed cycle, or as a show-control-triggered takeover.
+
+### Added
+- **Project** tab (`/project`):
+  - Live list of the viewers each Tractus host reports, with what each is
+    projecting (hosts that disagree are flagged), plus one-shot
+    **Project** / **Stop** to the checked viewers.
+  - **Cues**: saved projections (source + viewers + mode) that can be armed and
+    fired later by a short trigger code.
+    - `cycle` cues form a playlist: project for the *on* time, clear back to
+      the normal view for the *off* time, then the next active cycle cue.
+    - `hold` cues take over their viewers until released (highest priority
+      wins); the rotation resumes underneath when the hold is released.
+    - Optional auto-release (`duration`) and jump-to-now (`now=1`) on
+      activation; **All Clear** releases everything.
+- Projector engine (`app/services/projector.py`) on its own thread with
+  sub-second timing. Every command goes to **all** `TRACTUS_MV_HOSTS`; a
+  command only counts once that host returns 200, a down host is retried and
+  caught up on recovery, and a host that restarts and loses its projection is
+  re-sent automatically (checked against `/viewers` every 30 s). Active cues
+  are stored in the DB and resume after a Leash restart.
+- Show-control API (GET or POST, API-key protected):
+  - `/api/v1/project/status`, `/api/v1/project/cues`
+  - `/api/v1/project/cues/<code>/activate|deactivate|toggle`
+  - `/api/v1/project/clear`
+- Internal API under `/api/project/...` for the Project tab.
+- New `project_cues` table (created automatically on startup).
+- Audit events `PROJECT_CUE_ON`, `PROJECT_CUE_OFF`, `PROJECT_MANUAL`.
+
+### Changed
+- App version → `1.4.0`
+
+---
+
 ## [1.3.0] — 2026-09-08
 
 Bulk editing inside the snapshot preview.

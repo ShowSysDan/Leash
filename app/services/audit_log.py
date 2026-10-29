@@ -164,3 +164,13 @@ def device_error(ip: str, operation: str, http_status: int, detail: str = "") ->
         ip, operation, http_status, detail or "none", _actor(),
     )
     _persist_event(ip, "DEVICE_ERROR", f"{operation} (HTTP {http_status}) {detail}".strip())
+
+
+def project_cue_changed(name: str, code: str, active: bool, via: str) -> None:
+    _log.info("PROJECT_CUE_%s name=%r code=%s via=%s actor=%s",
+              "ON" if active else "OFF", name, code, via, _actor())
+
+
+def project_manual(viewers: list, source: str | None, succeeded: int, attempted: int) -> None:
+    _log.info("PROJECT_MANUAL viewers=%s source=%r succeeded=%d attempted=%d actor=%s",
+              ",".join(str(v) for v in viewers), source or "stop", succeeded, attempted, _actor())

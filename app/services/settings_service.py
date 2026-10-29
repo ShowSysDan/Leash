@@ -42,10 +42,10 @@ SETTINGS_SCHEMA: list[dict] = [
     # Tractus MV
     dict(key="TRACTUS_MV_HOSTS",       type="string", default="10.1.248.191,10.1.248.192",
          group="Tractus MV", label="Tractus MV Hosts",
-         description="Comma-separated IPs of Tractus MV servers (primary first)"),
+         description="Comma-separated IPs of Tractus MV servers (primary first; project commands go to all)"),
     dict(key="TRACTUS_MV_PORT",        type="int",    default="8901",
          group="Tractus MV", label="Tractus MV Port",
-         description="HTTP port for the Tractus MV /sources API"),
+         description="HTTP port for the Tractus MV API (sources, viewers, project)"),
     # Polling
     dict(key="SOURCE_POLL_INTERVAL",   type="int",    default="60",
          group="Polling", label="Source Sync Interval (s)",

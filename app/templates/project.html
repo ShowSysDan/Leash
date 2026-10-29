@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+{% block title %}Project — Leash NDI Source Control{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
+  <div>
+    <h4 class="mb-0"><i class="bi bi-cast me-2"></i>Project</h4>
+    <small class="text-muted">
+      Overlay a source on top of Tractus viewer outputs. Every command goes to all hosts:
+      {% for h in tractus_hosts %}<span class="badge bg-dark border border-secondary ms-1 host-badge" data-host="{{ h }}">{{ h }}</span>{% endfor %}
+    </small>
+  </div>
+  <button class="btn btn-sm btn-outline-danger" id="btn-clear-all" title="Deactivate every cue and restore the normal view">
+    <i class="bi bi-x-octagon me-1"></i>All Clear
+  </button>
+</div>
+
+<!-- ── Now playing ───────────────────────────────────────────────────────── -->
+<div class="card bg-dark border-secondary mb-3">
+  <div class="card-body py-2">
+    <div class="d-flex align-items-center gap-3 flex-wrap">
+      <span class="text-muted small text-uppercase">Playlist</span>
+      <span id="np-phase" class="badge bg-secondary">idle</span>
+      <span id="np-detail" class="small">No active cues — viewers show their normal layout.</span>
+    </div>
+    <div id="np-active" class="d-flex gap-1 flex-wrap mt-2"></div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <!-- ── Cues ───────────────────────────────────────────────────────────── -->
+  <div class="col-xl-7">
+    <div class="card bg-dark border-secondary h-100">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <span><i class="bi bi-collection-play me-1"></i>Cues</span>
+        <button class="btn btn-sm btn-primary" id="btn-new-cue"><i class="bi bi-plus-lg me-1"></i>New Cue</button>
+      </div>
+      <div class="card-body p-0">
+        {% if not cues %}
+        <div class="text-muted text-center py-4 small">
+          No cues yet. A cue is a source + viewers that you can arm now and fire later —
+          from here or from show control via its code.
+        </div>
+        {% else %}
+        <div class="table-responsive">
+          <table class="table table-dark table-hover align-middle mb-0 small">
+            <thead>
+              <tr>
+                <th style="width:1%"></th>
+                <th>Cue</th>
+                <th>Source</th>
+                <th>Viewers</th>
+                <th>Mode</th>
+                <th class="text-end">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for c in cues %}
+              <tr class="cue-row" data-cue-id="{{ c.id }}">
+                <td>
+                  <button class="btn btn-sm btn-cue-toggle {{ 'btn-success' if c.active else 'btn-outline-secondary' }}"
+                          data-cue-id="{{ c.id }}" title="Activate / deactivate">
+                    <i class="bi bi-{{ 'broadcast' if c.active else 'play-fill' }}"></i>
+                  </button>
+                </td>
+                <td>
+                  <strong>{{ c.name }}</strong>
+                  <span class="badge bg-warning text-dark ms-1 cue-live-badge" {% if not c.active %}style="display:none"{% endif %}>LIVE</span>
+                  <div><code class="cue-code" title="Show control trigger code">{{ c.code }}</code></div>
+                </td>
+                <td>{{ c.source_name }}</td>
+                <td>
+                  {% set vl = c.viewer_list() %}
+                  {% if vl %}{% for v in vl %}<span class="badge bg-secondary me-1">{{ v }}</span>{% endfor %}
+                  {% else %}<span class="text-muted">All</span>{% endif %}
+                </td>
+                <td>
+                  {% if c.mode == 'hold' %}
+                  <span class="badge bg-danger">Hold</span> <span class="text-muted">prio {{ c.priority }}</span>
+                  {% else %}
+                  <span class="badge bg-info text-dark">Cycle</span>
+                  <span class="text-muted">{{ c.dwell_seconds }}s on / {{ c.gap_seconds }}s off</span>
+                  {% endif %}
+                </td>
+                <td class="text-end text-nowrap">
+                  <button class="btn btn-xs btn-outline-secondary btn-copy-url" data-code="{{ c.code }}" title="Copy show-control URL">
+                    <i class="bi bi-link-45deg"></i>
+                  </button>
+                  <button class="btn btn-xs btn-outline-secondary btn-edit-cue" data-cue='{{ c.to_dict()|tojson }}' title="Edit">
+                    <i class="bi bi-pencil"></i>
+                  </button>
+                  <button class="btn btn-xs btn-outline-danger btn-delete-cue" data-cue-id="{{ c.id }}" data-name="{{ c.name }}" title="Delete">
+                    <i class="bi bi-trash"></i>
+                  </button>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+      </div>
+      <div class="card-footer small text-muted">
+        <strong>Cycle</strong> cues take turns: project for the "on" time, clear back to normal for the
+        "off" time, then the next active cycle cue (by order).
+        <strong>Hold</strong> cues take over their viewers until released — the highest priority wins.
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Viewers ────────────────────────────────────────────────────────── -->
+  <div class="col-xl-5">
+    <div class="card bg-dark border-secondary h-100">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <span><i class="bi bi-display me-1"></i>Viewers</span>
+        <button class="btn btn-sm btn-outline-secondary" id="btn-refresh-viewers" title="Refresh">
+          <i class="bi bi-arrow-repeat"></i>
+        </button>
+      </div>
+      <div class="card-body p-0">
+        <div id="viewer-host-errors"></div>
+        <div class="table-responsive">
+          <table class="table table-dark table-hover align-middle mb-0 small">
+            <thead>
+              <tr>
+                <th style="width:1%"><input type="checkbox" class="form-check-input" id="viewer-select-all"></th>
+                <th>#</th>
+                <th>Viewer</th>
+                <th>Projecting</th>
+              </tr>
+            </thead>
+            <tbody id="viewer-rows">
+              <tr><td colspan="4" class="text-muted text-center py-3">
+                <span class="spinner-border spinner-border-sm me-2"></span>Loading…
+              </td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="card-footer">
+        <div class="input-group input-group-sm">
+          <select class="form-select" id="manual-source">
+            <option value="">— source —</option>
+            {% for s in sources %}<option value="{{ s.name }}">{{ s.name }}</option>{% endfor %}
+          </select>
+          <button class="btn btn-primary" id="btn-manual-project"><i class="bi bi-cast me-1"></i>Project</button>
+          <button class="btn btn-outline-warning" id="btn-manual-stop"><i class="bi bi-stop-fill me-1"></i>Stop</button>
+        </div>
+        <div class="form-text">
+          One-shot to the checked viewers. Viewers marked <span class="badge bg-info text-dark">cue</span>
+          are driven by an active cue and will be overridden at its next change.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add / Edit Cue Modal -->
+<div class="modal fade" id="cueModal" tabindex="-1">
+  <div class="modal-dialog modal-fullscreen-sm-down">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="cue-modal-title">New Cue</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="cue-id">
+        <div class="row g-2 mb-3">
+          <div class="col-7">
+            <label class="form-label">Name</label>
+            <input type="text" id="cue-name" class="form-control" maxlength="100" placeholder="Severe weather radar">
+          </div>
+          <div class="col-5">
+            <label class="form-label">Trigger code</label>
+            <input type="text" id="cue-code" class="form-control font-monospace" maxlength="64" placeholder="weather">
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Source</label>
+          <input type="text" id="cue-source" class="form-control" list="cue-source-list" maxlength="255"
+                 placeholder="COMPUTER (Stream)">
+          <datalist id="cue-source-list">
+            {% for s in sources %}<option value="{{ s.name }}">{% endfor %}
+          </datalist>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Viewers</label>
+          <div id="cue-viewer-checks" class="d-flex flex-wrap gap-2 small"></div>
+          <div class="form-text">Leave all unchecked to target every viewer on every host.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Mode</label>
+          <select id="cue-mode" class="form-select">
+            <option value="cycle">Cycle — take turns in the playlist</option>
+            <option value="hold">Hold — take over until released</option>
+          </select>
+        </div>
+        <div class="row g-2 mb-3" id="cue-cycle-fields">
+          <div class="col-6">
+            <label class="form-label">On (dwell) seconds</label>
+            <input type="number" id="cue-dwell" class="form-control" min="1" value="10">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Off (normal view) seconds</label>
+            <input type="number" id="cue-gap" class="form-control" min="0" value="30">
+          </div>
+        </div>
+        <div class="row g-2">
+          <div class="col-6">
+            <label class="form-label">Priority</label>
+            <input type="number" id="cue-priority" class="form-control" value="0">
+            <div class="form-text">Hold cues: higher wins.</div>
+          </div>
+          <div class="col-6">
+            <label class="form-label">Playlist order</label>
+            <input type="number" id="cue-order" class="form-control" value="0">
+            <div class="form-text">Cycle cues: lower plays first.</div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btn-save-cue">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for('static', filename='js/project.js') }}"></script>
+{% endblock %}

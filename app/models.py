@@ -546,3 +546,67 @@ class NDISource(db.Model):
             "online": self.discovered,
             "last_seen": self.last_seen.isoformat() if self.last_seen else None,
         }
+
+
+# ── Tractus projector cues ────────────────────────────────────────────────
+
+class ProjectCue(db.Model):
+    """A saved Tractus "project" — an NDI source overlaid on viewer outputs.
+
+    Cues sit armed-but-idle until activated (UI or /api/v1 by ``code``).
+    While active, the projector engine (app.services.projector) drives every
+    Tractus host:
+
+      mode="cycle"  joins the playlist rotation — project for dwell_seconds,
+                    clear back to the normal view for gap_seconds, then the
+                    next active cycle cue (by sort_order) takes its turn.
+      mode="hold"   takeover — projected continuously on its viewers,
+                    overriding the rotation there.  Highest priority wins;
+                    ties go to the most recently activated.
+    """
+    __tablename__ = "project_cues"
+
+    MODES = ("cycle", "hold")
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    # Short trigger string for show control, e.g. "weather"
+    code = db.Column(db.String(64), unique=True, nullable=False)
+    source_name = db.Column(db.String(255), nullable=False)
+    # Comma-separated Tractus viewer indexes; empty = every viewer on each host
+    viewers = db.Column(db.String(255), nullable=False, default="")
+    mode = db.Column(db.String(10), nullable=False, default="cycle")
+    dwell_seconds = db.Column(db.Integer, nullable=False, default=10)
+    gap_seconds = db.Column(db.Integer, nullable=False, default=30)
+    priority = db.Column(db.Integer, nullable=False, default=0)
+    sort_order = db.Column(db.Integer, nullable=False, default=0)
+
+    active = db.Column(db.Boolean, nullable=False, default=False)
+    activated_at = db.Column(db.DateTime)
+    # Optional auto-release time for an activation (UTC)
+    active_until = db.Column(db.DateTime)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def viewer_list(self) -> list[int] | None:
+        """Targeted viewer indexes, or None meaning "all viewers"."""
+        idx = [int(v) for v in (self.viewers or "").split(",") if v.strip().lstrip("-").isdigit()]
+        return idx or None
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "code": self.code,
+            "source_name": self.source_name,
+            "viewers": self.viewer_list(),
+            "mode": self.mode,
+            "dwell_seconds": self.dwell_seconds,
+            "gap_seconds": self.gap_seconds,
+            "priority": self.priority,
+            "sort_order": self.sort_order,
+            "active": self.active,
+            "activated_at": self.activated_at.isoformat() if self.activated_at else None,
+            "active_until": self.active_until.isoformat() if self.active_until else None,
+        }

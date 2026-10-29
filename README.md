@@ -4,7 +4,7 @@ Flask/Python application that centrally controls a network of **BirdDog NDI PLAY
 Replaces a QSYS Lua script as the single routing control point for up to 254 receivers on a shared subnet.
 SQLite for development, PostgreSQL-ready for production.
 
-Current version: **1.3.0**
+Current version: **1.4.0**
 
 ---
 
@@ -20,6 +20,7 @@ Current version: **1.3.0**
 | **Snapshots** | Save and recall routing state — full or partial (any subset of receivers) |
 | **Schedules** | Cron-like automation — recall a snapshot on selected days at a set time |
 | **Persistent enforcement** | After a scheduled recall, poll receivers and correct any source drift for a configurable window |
+| **Tractus Project** | Overlay ("project") a source on top of Tractus MV viewer outputs — manual one-shot, timed cycling playlist, or hold/takeover cues fired by show control. Every command goes to all Tractus hosts |
 | **External API** | `/api/v1/` for QSYS, Crestron, AMX — route by stable index or source name |
 | **Operator view** | Mobile-first `/operator` page with bottom-tab navigation for control on the move |
 | **Receiver search** | Sticky filter bar on the dashboard — type any hostname fragment or IP last octet |
@@ -44,11 +45,14 @@ Leash/
 │   │   ├── layouts_api.py       # Layouts API
 │   │   ├── snapshots_api.py     # Snapshots API
 │   │   ├── schedules_api.py     # Schedules API
+│   │   ├── project_api.py       # Tractus Project cues + viewers API
 │   │   └── external_api.py      # External integration API (/api/v1/)
 │   ├── services/
 │   │   ├── birddog_client.py    # Async BirdDog REST client (full v2.0 coverage)
 │   │   ├── scanner.py           # Subnet scanner
 │   │   ├── scheduler.py         # APScheduler — recalls + enforcement
+│   │   ├── projector.py         # Tractus projector playlist engine (own thread)
+│   │   ├── tractus_client.py    # Tractus MV client — sources, viewers, project commands
 │   │   └── audit_log.py         # Structured syslog helpers
 │   ├── static/
 │   │   ├── css/style.css
@@ -59,6 +63,7 @@ Leash/
 │   │       ├── layout.js        # Canvas drag (mouse + touch)
 │   │       ├── snapshots.js
 │   │       ├── schedules.js
+│   │       ├── project.js
 │   │       └── receiver_detail.js
 │   └── templates/
 │       ├── base.html
@@ -70,6 +75,7 @@ Leash/
 │       ├── layout_view.html
 │       ├── snapshots.html
 │       ├── schedules.html
+│       ├── project.html         # Tractus Project tab (/project)
 │       ├── sources.html
 │       └── partials/
 ├── docs/
@@ -285,6 +291,75 @@ Tune `RECALL_CONCURRENCY` and `ENFORCEMENT_INTERVAL` in `.env` to match your net
 
 ---
 
+## Tractus Project (source overlay)
+
+The **Project** tab drives the Tractus MV "projector": a source overlaid full-frame on top
+of a viewer's multiview output (`/viewer/{n}/project/source/{name}`), cleared with
+`/viewer/{n}/project/stop`. **Every command is sent to every host in `TRACTUS_MV_HOSTS`**
+so mirrored Tractus servers always show the same thing.
+
+### Manual
+The **Viewers** panel lists the viewers each host reports (`/viewers`) and what each is
+projecting — hosts that disagree are shown in red. Check viewers, pick a source, and
+**Project** or **Stop**. This is a one-shot command; a viewer marked `cue` is being driven by an
+active cue and will be overridden at that cue's next change.
+
+### Cues
+A cue is a saved projection you arm now and fire later — from the UI or from show control
+by its **trigger code** (e.g. `weather`).
+
+| Field | Meaning |
+|---|---|
+| Source | NDI source to project |
+| Viewers | Viewer indexes to target, or none checked = **all viewers on every host** |
+| Mode `cycle` | Take a turn in the playlist: project for *On* seconds, clear back to normal for *Off* seconds |
+| Mode `hold` | Take over the viewers continuously until released |
+| Priority | Between overlapping hold cues, the highest wins (ties → most recently activated) |
+| Playlist order | Order cycle cues take their turns in (lowest first) |
+
+### How the playlist plays
+All active **cycle** cues share one timeline so every viewer and host flips together:
+
+```
+promo on (10s) → normal (30s) → radar on (10s) → normal (30s) → promo on …
+```
+
+- Activating a cycle cue adds it to the rotation (it starts immediately if the rotation was
+  idle). Pass `now=1` to jump the rotation straight to it.
+- Deactivating the cue currently on air clears it immediately and the rotation moves on.
+- An active **hold** cue overrides its viewers; the rotation keeps running underneath, so
+  when the hold is released those viewers fall straight back into the playlist (or the
+  normal view if nothing else is active).
+- `duration=<seconds>` on activation auto-releases the cue — e.g. a weather warning that
+  expires on its own.
+- **All Clear** (or `/api/v1/project/clear`) deactivates everything.
+
+Leash only touches viewers an active cue targets. When the last cue releases a viewer it
+sends one `project/stop` and then leaves it alone.
+
+### Reliability
+- The engine runs on its own thread with sub-second timing; active cues are stored in the
+  DB, so a Leash restart resumes where it left off.
+- A command only counts as applied after that host answers 200. A host that is down is
+  retried (10 s back-off) and caught up as soon as it returns, without holding up the others.
+- Every 30 s Leash re-reads `/viewers`; if a host restarted and lost its projection, it is
+  re-sent automatically.
+
+### Show-control examples
+```bash
+# Severe weather: flip every output to radar until released
+curl "http://leash/api/v1/project/cues/weather/activate?api_key=KEY"
+curl "http://leash/api/v1/project/cues/weather/deactivate?api_key=KEY"
+
+# Add the alt source to the rotation for 1 hour, starting now
+curl -X POST -H "X-API-Key: KEY" "http://leash/api/v1/project/cues/alt/activate?duration=3600&now=1"
+
+# Back to the normal view everywhere
+curl "http://leash/api/v1/project/clear?api_key=KEY"
+```
+
+---
+
 ## API Reference
 
 ### Internal API (`/api/`)
@@ -401,6 +476,37 @@ Schedule body:
 `days_of_week`: comma-separated integers, 0 = Monday … 6 = Sunday.
 `time_of_day`: HH:MM, **local server time**, 24-hour.
 
+#### Tractus Project
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/project/viewers` | Live viewers from every host, merged by index |
+| POST | `/api/project/manual` | One-shot `{"viewers":[0,1],"source":"NAME"}` — omit `source` to stop |
+| GET | `/api/project/status` | Engine state + active cues |
+| GET / POST | `/api/project/cues` | List / create |
+| PUT / DELETE | `/api/project/cues/<id>` | Update / delete (a live cue is stopped first) |
+| POST | `/api/project/cues/<id>/activate` | Body `{"duration":600,"now":true}` (both optional) |
+| POST | `/api/project/cues/<id>/deactivate` | Release |
+| POST | `/api/project/clear` | Release every cue |
+
+Cue body:
+
+```json
+{
+  "name": "Severe weather radar",
+  "code": "weather",
+  "source_name": "WX (Radar)",
+  "viewers": [],
+  "mode": "hold",
+  "dwell_seconds": 10,
+  "gap_seconds": 30,
+  "priority": 10,
+  "sort_order": 0
+}
+```
+
+`code`: lowercase letters, digits, `-`, `_`. `viewers`: `[]` = all viewers.
+
 ---
 
 ### External Integration API (`/api/v1/`)
@@ -437,6 +543,21 @@ Leave `API_KEY` unset for unauthenticated access on a trusted LAN.
 
 `source` can be a **stable integer index** or a **source name string**.
 
+#### Tractus Project cues
+
+Every endpoint accepts **GET or POST**, so a show-control system can fire a plain URL.
+`<cue>` is the cue's trigger code (e.g. `weather`) or its numeric id. Parameters can go in
+the query string or a JSON body.
+
+| Endpoint | Description |
+|---|---|
+| `/api/v1/project/status` | Engine state: phase (`idle`/`dwell`/`gap`), current cue, seconds remaining, host health, per-viewer sync |
+| `/api/v1/project/cues` | All cues with active state |
+| `/api/v1/project/cues/<cue>/activate` | Activate. Optional `duration=<1–86400 s>` auto-release, `now=1` jump the rotation to it |
+| `/api/v1/project/cues/<cue>/deactivate` | Release |
+| `/api/v1/project/cues/<cue>/toggle` | Activate if off, release if on (accepts the activate options) |
+| `/api/v1/project/clear` | Release every cue — normal view everywhere |
+
 Sample QSYS Lua script: `docs/qsys_integration.lua`
 
 ---
@@ -464,6 +585,9 @@ Each source-change entry includes a `via=` tag:
 | `v1` | External API single route |
 | `v1_bulk` | External API bulk route |
 | `enforcement` | Persistent enforcement correction |
+
+Tractus Project events are logged as `PROJECT_CUE_ON` / `PROJECT_CUE_OFF` (with
+`via=ui|v1|expired|ui-delete`) and `PROJECT_MANUAL` for one-shot projections.
 
 Every audit event also carries an `actor=` field naming who triggered it:
 
