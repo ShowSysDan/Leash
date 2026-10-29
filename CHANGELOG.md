@@ -6,6 +6,30 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.4.1] — 2026-10-29
+
+Project tab usability pass.
+
+### Changed
+- Cue editor: **Source to project** is now a dropdown (online sources, plus
+  known offline sources in their own group) instead of free text.
+- Cue editor: **Target viewers** is now a dropdown defaulting to
+  "All viewers"; picking a viewer adds it as a removable chip (shown by
+  index and name) instead of a wall of checkboxes.
+- Cue editor only shows the fields that apply to the chosen mode
+  (On/Off seconds + playlist order for cycle, priority for hold).
+- Viewers pane renamed **Viewers — Manual Project**; it now states which
+  viewers are selected and keeps Project / Stop disabled until viewers (and
+  a source, for Project) are chosen.
+- Cue table shows viewer names alongside indexes.
+- App version → `1.4.1`
+
+### Added
+- ⓘ tooltips on every cue setting, table column and button on the Project
+  page explaining what each does.
+
+---
+
 ## [1.4.0] — 2026-10-29
 
 Tractus Project: overlay a source on top of Tractus MV viewer outputs, manually,

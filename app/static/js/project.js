@@ -18,6 +18,17 @@
     return el;
   }
 
+  function initTooltips(root = document) {
+    root.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(el => {
+      if (!bootstrap.Tooltip.getInstance(el)) new bootstrap.Tooltip(el);
+    });
+  }
+
+  function viewerLabel(i) {
+    const v = knownViewers.find(x => x.index === i);
+    return v ? `${i} · ${v.name}` : `${i} (not reporting)`;
+  }
+
   async function api(method, url, body) {
     const opts = { method, headers: {} };
     if (body !== undefined) {
@@ -142,17 +153,44 @@
   }
 
   async function refreshViewers() {
-    try { renderViewers(await api('GET', '/api/project/viewers')); }
+    try {
+      renderViewers(await api('GET', '/api/project/viewers'));
+      document.querySelectorAll('.viewer-name-badge').forEach(b => {
+        b.textContent = viewerLabel(Number(b.dataset.viewer));
+      });
+      updateManualSelection();
+    }
     catch (e) { Leash.toast(`Viewer refresh failed: ${e.message}`, 'danger'); }
+  }
+
+  function checkedViewers() {
+    return [...document.querySelectorAll('.viewer-check:checked')].map(c => Number(c.value));
+  }
+
+  // Tell the operator what Project / Stop will hit, and only enable them
+  // once there is something to hit.
+  function updateManualSelection() {
+    const sel = checkedViewers();
+    const source = document.getElementById('manual-source').value;
+    const label = document.getElementById('manual-selection');
+    label.textContent = sel.length
+      ? `Selected: ${sel.map(viewerLabel).join(', ')}`
+      : 'Check viewers above to project onto them.';
+    label.className = `small mb-1 ${sel.length ? 'text-info' : 'text-muted'}`;
+    document.getElementById('btn-manual-project').disabled = !sel.length || !source;
+    document.getElementById('btn-manual-stop').disabled = !sel.length;
   }
 
   document.getElementById('btn-refresh-viewers').addEventListener('click', refreshViewers);
   document.getElementById('viewer-select-all').addEventListener('change', function () {
     document.querySelectorAll('.viewer-check').forEach(c => { c.checked = this.checked; });
+    updateManualSelection();
   });
+  document.getElementById('viewer-rows').addEventListener('change', updateManualSelection);
+  document.getElementById('manual-source').addEventListener('change', updateManualSelection);
 
   async function manual(source) {
-    const viewers = [...document.querySelectorAll('.viewer-check:checked')].map(c => Number(c.value));
+    const viewers = checkedViewers();
     if (!viewers.length) { Leash.toast('Check at least one viewer', 'warning'); return; }
     if (source === '') { Leash.toast('Choose a source to project', 'warning'); return; }
     try {
@@ -198,30 +236,59 @@
     catch (e) { Leash.toast(e.message, 'danger'); }
   }));
 
-  function renderViewerChecks(selected) {
-    const wrap = document.getElementById('cue-viewer-checks');
-    wrap.textContent = '';
+  // ── target viewer picker: a dropdown that adds removable chips ──────────
+  let pickedViewers = [];
+
+  function renderViewerPicker() {
+    const select = document.getElementById('cue-viewer-add');
+    select.textContent = '';
+    select.appendChild(h('option', { value: '' },
+      pickedViewers.length ? '+ add another viewer…' : 'All viewers (every viewer on every host)'));
     const indexes = new Set(knownViewers.map(v => v.index));
-    (selected || []).forEach(i => indexes.add(i));   // keep targets of offline viewers
-    if (!indexes.size) {
-      wrap.appendChild(h('span', { class: 'text-muted' }, 'No viewers reported — the cue will target all viewers.'));
-      return;
-    }
-    [...indexes].sort((a, b) => a - b).forEach(i => {
-      const v = knownViewers.find(x => x.index === i);
-      const id = `cue-viewer-${i}`;
-      const div = h('div', { class: 'form-check form-check-inline me-0' });
-      const cb = h('input', { type: 'checkbox', class: 'form-check-input cue-viewer-check', id, value: String(i) });
-      cb.checked = (selected || []).includes(i);
-      div.appendChild(cb);
-      div.appendChild(h('label', { class: 'form-check-label', htmlFor: id }, `${i}: ${v ? v.name : '(offline)'}`));
-      wrap.appendChild(div);
+    [...indexes].sort((a, b) => a - b)
+      .filter(i => !pickedViewers.includes(i))
+      .forEach(i => select.appendChild(h('option', { value: String(i) }, viewerLabel(i))));
+
+    const chips = document.getElementById('cue-viewer-chips');
+    chips.textContent = '';
+    pickedViewers.forEach(i => {
+      const chip = h('span', { class: 'badge bg-primary d-inline-flex align-items-center gap-1' }, viewerLabel(i));
+      const x = h('button', { type: 'button', class: 'btn-close btn-close-white', title: 'Remove' });
+      x.style.fontSize = '0.55em';
+      x.addEventListener('click', () => {
+        pickedViewers = pickedViewers.filter(v => v !== i);
+        renderViewerPicker();
+      });
+      chip.appendChild(x);
+      chips.appendChild(chip);
     });
+    if (pickedViewers.length) {
+      const all = h('button', { type: 'button', class: 'btn btn-link btn-sm p-0 ms-1' }, 'use all viewers');
+      all.addEventListener('click', () => { pickedViewers = []; renderViewerPicker(); });
+      chips.appendChild(all);
+    }
+  }
+
+  document.getElementById('cue-viewer-add').addEventListener('change', function () {
+    if (this.value !== '') {
+      pickedViewers = [...pickedViewers, Number(this.value)].sort((a, b) => a - b);
+      renderViewerPicker();
+    }
+  });
+
+  function setSource(name) {
+    const select = document.getElementById('cue-source');
+    // A cue may point at a source Leash has never seen — keep it selectable.
+    if (name && ![...select.options].some(o => o.value === name)) {
+      select.appendChild(h('option', { value: name }, `${name} (unknown)`));
+    }
+    select.value = name || '';
   }
 
   function applyModeUI() {
-    document.getElementById('cue-cycle-fields').style.display =
-      document.getElementById('cue-mode').value === 'cycle' ? '' : 'none';
+    const cycle = document.getElementById('cue-mode').value === 'cycle';
+    document.querySelectorAll('.cue-cycle-only').forEach(el => { el.style.display = cycle ? '' : 'none'; });
+    document.querySelectorAll('.cue-hold-only').forEach(el => { el.style.display = cycle ? 'none' : ''; });
   }
   document.getElementById('cue-mode').addEventListener('change', applyModeUI);
 
@@ -230,13 +297,14 @@
     document.getElementById('cue-id').value = c ? c.id : '';
     document.getElementById('cue-name').value = c ? c.name : '';
     document.getElementById('cue-code').value = c ? c.code : '';
-    document.getElementById('cue-source').value = c ? c.source_name : '';
+    setSource(c ? c.source_name : '');
     document.getElementById('cue-mode').value = c ? c.mode : 'cycle';
     document.getElementById('cue-dwell').value = c ? c.dwell_seconds : 10;
     document.getElementById('cue-gap').value = c ? c.gap_seconds : 30;
     document.getElementById('cue-priority').value = c ? c.priority : 0;
     document.getElementById('cue-order').value = c ? c.sort_order : 0;
-    renderViewerChecks(c ? c.viewers : []);
+    pickedViewers = c && c.viewers ? [...c.viewers] : [];
+    renderViewerPicker();
     applyModeUI();
     modal.show();
   }
@@ -258,7 +326,7 @@
       name: document.getElementById('cue-name').value,
       code: document.getElementById('cue-code').value,
       source_name: document.getElementById('cue-source').value,
-      viewers: [...document.querySelectorAll('.cue-viewer-check:checked')].map(c => Number(c.value)),
+      viewers: pickedViewers,
       mode: document.getElementById('cue-mode').value,
       dwell_seconds: document.getElementById('cue-dwell').value,
       gap_seconds: document.getElementById('cue-gap').value,
@@ -273,6 +341,7 @@
 
   // ── boot ──────────────────────────────────────────────────────────────────
 
+  initTooltips();
   pollStatus();
   refreshViewers();
   setInterval(pollStatus, 1000);

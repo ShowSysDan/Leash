@@ -4,7 +4,7 @@ Flask/Python application that centrally controls a network of **BirdDog NDI PLAY
 Replaces a QSYS Lua script as the single routing control point for up to 254 receivers on a shared subnet.
 SQLite for development, PostgreSQL-ready for production.
 
-Current version: **1.4.0**
+Current version: **1.4.1**
 
 ---
 
@@ -299,10 +299,16 @@ of a viewer's multiview output (`/viewer/{n}/project/source/{name}`), cleared wi
 so mirrored Tractus servers always show the same thing.
 
 ### Manual
-The **Viewers** panel lists the viewers each host reports (`/viewers`) and what each is
-projecting — hosts that disagree are shown in red. Check viewers, pick a source, and
-**Project** or **Stop**. This is a one-shot command; a viewer marked `cue` is being driven by an
-active cue and will be overridden at that cue's next change.
+The **Viewers — Manual Project** panel lists the viewers each host reports (`/viewers`) and
+what each is projecting right now (— = normal view; hosts that disagree are shown in red).
+
+The checkboxes choose which viewers the **Project** / **Stop** buttons act on: check one or
+more viewers, pick a source, and press **Project** (overlay it) or **Stop** (back to normal).
+The line above the buttons spells out the current selection, and the buttons stay disabled
+until there is something to act on. This is a one-off command, separate from cues; a viewer
+marked `cue` is being driven by an active cue and will be overridden at that cue's next change.
+
+Every setting and column on the page has an ⓘ tooltip explaining what it does.
 
 ### Cues
 A cue is a saved projection you arm now and fire later — from the UI or from show control
@@ -310,8 +316,8 @@ by its **trigger code** (e.g. `weather`).
 
 | Field | Meaning |
 |---|---|
-| Source | NDI source to project |
-| Viewers | Viewer indexes to target, or none checked = **all viewers on every host** |
+| Source | NDI source to project, chosen from a dropdown. Known-but-offline sources are listed too, so you can arm a cue for a feed that only comes up during an event |
+| Target viewers | Defaults to **All viewers** (every viewer on every host, including ones added later). Pick viewers from the dropdown to target only those — each appears as a removable chip |
 | Mode `cycle` | Take a turn in the playlist: project for *On* seconds, clear back to normal for *Off* seconds |
 | Mode `hold` | Take over the viewers continuously until released |
 | Priority | Between overlapping hold cues, the highest wins (ties → most recently activated) |
