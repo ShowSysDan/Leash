@@ -123,6 +123,10 @@ def project():
         "project.html",
         cues=cues,
         sources=_online_sources(),
+        # Cues may be armed for a source that is only up during an event
+        # (e.g. weather radar), so the cue editor also offers offline ones.
+        offline_sources=NDISource.query.filter_by(discovered=False)
+                                      .order_by(NDISource.name).all(),
         tractus_hosts=current_app.config.get("TRACTUS_MV_HOSTS") or [],
     )
 

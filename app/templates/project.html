@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Project — Leash NDI Source Control{% endblock %}
 
+{% macro tip(text) -%}
+<i class="bi bi-info-circle text-muted ms-1 help-tip" tabindex="0" data-bs-toggle="tooltip"
+   data-bs-placement="top" title="{{ text }}"></i>
+{%- endmacro %}
+
 {% block content %}
 <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-3">
   <div>
@@ -10,7 +15,7 @@
       {% for h in tractus_hosts %}<span class="badge bg-dark border border-secondary ms-1 host-badge" data-host="{{ h }}">{{ h }}</span>{% endfor %}
     </small>
   </div>
-  <button class="btn btn-sm btn-outline-danger" id="btn-clear-all" title="Deactivate every cue and restore the normal view">
+  <button class="btn btn-sm btn-outline-danger" id="btn-clear-all" data-bs-toggle="tooltip" title="Release every active cue at once. All viewers go back to their normal multiview layout.">
     <i class="bi bi-x-octagon me-1"></i>All Clear
   </button>
 </div>
@@ -19,7 +24,7 @@
 <div class="card bg-dark border-secondary mb-3">
   <div class="card-body py-2">
     <div class="d-flex align-items-center gap-3 flex-wrap">
-      <span class="text-muted small text-uppercase">Playlist</span>
+      <span class="text-muted small text-uppercase">Now playing{{ tip("What the cue engine is doing right now. Projecting = a cycle cue is on screen; Normal view = the gap between cycle cues; Idle = no cycle cues active. Active cues are listed underneath (red = hold).") }}</span>
       <span id="np-phase" class="badge bg-secondary">idle</span>
       <span id="np-detail" class="small">No active cues — viewers show their normal layout.</span>
     </div>
@@ -32,8 +37,8 @@
   <div class="col-xl-7">
     <div class="card bg-dark border-secondary h-100">
       <div class="card-header d-flex align-items-center justify-content-between">
-        <span><i class="bi bi-collection-play me-1"></i>Cues</span>
-        <button class="btn btn-sm btn-primary" id="btn-new-cue"><i class="bi bi-plus-lg me-1"></i>New Cue</button>
+        <span><i class="bi bi-collection-play me-1"></i>Cues{{ tip("Saved projections you set up ahead of time and fire later, from here (▶ button) or from show control using the trigger code.") }}</span>
+        <button class="btn btn-sm btn-primary" id="btn-new-cue" data-bs-toggle="tooltip" title="Create a new cue"><i class="bi bi-plus-lg me-1"></i>New Cue</button>
       </div>
       <div class="card-body p-0">
         {% if not cues %}
@@ -46,11 +51,11 @@
           <table class="table table-dark table-hover align-middle mb-0 small">
             <thead>
               <tr>
-                <th style="width:1%"></th>
-                <th>Cue</th>
+                <th class="text-nowrap" style="width:1%">On{{ tip("Green = cue is active (LIVE). Click to activate or release it.") }}</th>
+                <th>Cue{{ tip("Cue name, with its trigger code underneath. Show control fires the cue using the code.") }}</th>
                 <th>Source</th>
-                <th>Viewers</th>
-                <th>Mode</th>
+                <th>Viewers{{ tip("Which Tractus viewers the cue projects onto. All = every viewer on every host.") }}</th>
+                <th>Mode{{ tip("Cycle: takes turns in the playlist, on for X seconds then normal view for Y seconds. Hold: stays on until released and overrides the playlist.") }}</th>
                 <th class="text-end">Actions</th>
               </tr>
             </thead>
@@ -59,19 +64,19 @@
               <tr class="cue-row" data-cue-id="{{ c.id }}">
                 <td>
                   <button class="btn btn-sm btn-cue-toggle {{ 'btn-success' if c.active else 'btn-outline-secondary' }}"
-                          data-cue-id="{{ c.id }}" title="Activate / deactivate">
+                          data-cue-id="{{ c.id }}" data-bs-toggle="tooltip" title="Activate / release this cue">
                     <i class="bi bi-{{ 'broadcast' if c.active else 'play-fill' }}"></i>
                   </button>
                 </td>
                 <td>
                   <strong>{{ c.name }}</strong>
                   <span class="badge bg-warning text-dark ms-1 cue-live-badge" {% if not c.active %}style="display:none"{% endif %}>LIVE</span>
-                  <div><code class="cue-code" title="Show control trigger code">{{ c.code }}</code></div>
+                  <div><code class="cue-code">{{ c.code }}</code></div>
                 </td>
                 <td>{{ c.source_name }}</td>
                 <td>
                   {% set vl = c.viewer_list() %}
-                  {% if vl %}{% for v in vl %}<span class="badge bg-secondary me-1">{{ v }}</span>{% endfor %}
+                  {% if vl %}{% for v in vl %}<span class="badge bg-secondary me-1 viewer-name-badge" data-viewer="{{ v }}">{{ v }}</span>{% endfor %}
                   {% else %}<span class="text-muted">All</span>{% endif %}
                 </td>
                 <td>
@@ -83,13 +88,13 @@
                   {% endif %}
                 </td>
                 <td class="text-end text-nowrap">
-                  <button class="btn btn-xs btn-outline-secondary btn-copy-url" data-code="{{ c.code }}" title="Copy show-control URL">
+                  <button class="btn btn-xs btn-outline-secondary btn-copy-url" data-code="{{ c.code }}" data-bs-toggle="tooltip" title="Copy the show-control URL that activates this cue">
                     <i class="bi bi-link-45deg"></i>
                   </button>
-                  <button class="btn btn-xs btn-outline-secondary btn-edit-cue" data-cue='{{ c.to_dict()|tojson }}' title="Edit">
+                  <button class="btn btn-xs btn-outline-secondary btn-edit-cue" data-cue='{{ c.to_dict()|tojson }}' data-bs-toggle="tooltip" title="Edit">
                     <i class="bi bi-pencil"></i>
                   </button>
-                  <button class="btn btn-xs btn-outline-danger btn-delete-cue" data-cue-id="{{ c.id }}" data-name="{{ c.name }}" title="Delete">
+                  <button class="btn btn-xs btn-outline-danger btn-delete-cue" data-cue-id="{{ c.id }}" data-name="{{ c.name }}" data-bs-toggle="tooltip" title="Delete (a live cue is released first)">
                     <i class="bi bi-trash"></i>
                   </button>
                 </td>
@@ -112,8 +117,8 @@
   <div class="col-xl-5">
     <div class="card bg-dark border-secondary h-100">
       <div class="card-header d-flex align-items-center justify-content-between">
-        <span><i class="bi bi-display me-1"></i>Viewers</span>
-        <button class="btn btn-sm btn-outline-secondary" id="btn-refresh-viewers" title="Refresh">
+        <span><i class="bi bi-display me-1"></i>Viewers — Manual Project{{ tip("Live list of the viewers your Tractus hosts are running and what each is projecting right now. Check viewers, pick a source below, and press Project or Stop to send a one-off command. This is separate from cues.") }}</span>
+        <button class="btn btn-sm btn-outline-secondary" id="btn-refresh-viewers" data-bs-toggle="tooltip" title="Refresh viewer list now (it also refreshes every 10 s)">
           <i class="bi bi-arrow-repeat"></i>
         </button>
       </div>
@@ -123,10 +128,11 @@
           <table class="table table-dark table-hover align-middle mb-0 small">
             <thead>
               <tr>
-                <th style="width:1%"><input type="checkbox" class="form-check-input" id="viewer-select-all"></th>
-                <th>#</th>
+                <th style="width:1%"><input type="checkbox" class="form-check-input" id="viewer-select-all"
+                    data-bs-toggle="tooltip" title="Select / deselect all viewers"></th>
+                <th>#{{ tip("Tractus viewer index") }}</th>
                 <th>Viewer</th>
-                <th>Projecting</th>
+                <th>Projecting{{ tip("Source currently overlaid on this viewer. — means the normal multiview is showing. Red means the two hosts disagree.") }}</th>
               </tr>
             </thead>
             <tbody id="viewer-rows">
@@ -138,17 +144,20 @@
         </div>
       </div>
       <div class="card-footer">
+        <div class="small mb-1" id="manual-selection">Check viewers above to project onto them.</div>
         <div class="input-group input-group-sm">
           <select class="form-select" id="manual-source">
-            <option value="">— source —</option>
+            <option value="">— choose a source —</option>
             {% for s in sources %}<option value="{{ s.name }}">{{ s.name }}</option>{% endfor %}
           </select>
-          <button class="btn btn-primary" id="btn-manual-project"><i class="bi bi-cast me-1"></i>Project</button>
-          <button class="btn btn-outline-warning" id="btn-manual-stop"><i class="bi bi-stop-fill me-1"></i>Stop</button>
+          <button class="btn btn-primary" id="btn-manual-project" disabled
+                  data-bs-toggle="tooltip" title="Overlay the chosen source on the checked viewers (all hosts)"><i class="bi bi-cast me-1"></i>Project</button>
+          <button class="btn btn-outline-warning" id="btn-manual-stop" disabled
+                  data-bs-toggle="tooltip" title="Remove any overlay from the checked viewers — back to their normal view"><i class="bi bi-stop-fill me-1"></i>Stop</button>
         </div>
         <div class="form-text">
-          One-shot to the checked viewers. Viewers marked <span class="badge bg-info text-dark">cue</span>
-          are driven by an active cue and will be overridden at its next change.
+          Viewers marked <span class="badge bg-info text-dark">cue</span> are being driven by an active cue —
+          a manual command there only lasts until that cue's next change.
         </div>
       </div>
     </div>
@@ -167,55 +176,57 @@
         <input type="hidden" id="cue-id">
         <div class="row g-2 mb-3">
           <div class="col-7">
-            <label class="form-label">Name</label>
+            <label class="form-label" for="cue-name">Name{{ tip("A friendly name shown on this page, e.g. Severe weather radar.") }}</label>
             <input type="text" id="cue-name" class="form-control" maxlength="100" placeholder="Severe weather radar">
           </div>
           <div class="col-5">
-            <label class="form-label">Trigger code</label>
+            <label class="form-label" for="cue-code">Trigger code{{ tip("Short word show control sends to fire this cue, e.g. weather → /api/v1/project/cues/weather/activate. Lowercase letters, numbers, - and _ only.") }}</label>
             <input type="text" id="cue-code" class="form-control font-monospace" maxlength="64" placeholder="weather">
           </div>
         </div>
         <div class="mb-3">
-          <label class="form-label">Source</label>
-          <input type="text" id="cue-source" class="form-control" list="cue-source-list" maxlength="255"
-                 placeholder="COMPUTER (Stream)">
-          <datalist id="cue-source-list">
-            {% for s in sources %}<option value="{{ s.name }}">{% endfor %}
-          </datalist>
+          <label class="form-label" for="cue-source">Source to project{{ tip("The NDI source overlaid full-frame on top of the viewers. Offline sources are listed too, so you can arm a cue for a feed that only comes up during an event.") }}</label>
+          <select id="cue-source" class="form-select">
+            <option value="">— choose a source —</option>
+            <optgroup label="Online">
+              {% for s in sources %}<option value="{{ s.name }}">{{ s.name }}</option>{% endfor %}
+            </optgroup>
+            {% if offline_sources %}
+            <optgroup label="Offline (known)">
+              {% for s in offline_sources %}<option value="{{ s.name }}">{{ s.name }} (offline)</option>{% endfor %}
+            </optgroup>
+            {% endif %}
+          </select>
         </div>
         <div class="mb-3">
-          <label class="form-label">Viewers</label>
-          <div id="cue-viewer-checks" class="d-flex flex-wrap gap-2 small"></div>
-          <div class="form-text">Leave all unchecked to target every viewer on every host.</div>
+          <label class="form-label" for="cue-viewer-add">Target viewers{{ tip("Which viewer outputs get the overlay. Leave on All viewers to hit every viewer on every Tractus host (including ones added later), or pick viewers one at a time to target only those.") }}</label>
+          <select id="cue-viewer-add" class="form-select"></select>
+          <div id="cue-viewer-chips" class="d-flex flex-wrap gap-1 mt-2"></div>
         </div>
         <div class="mb-3">
-          <label class="form-label">Mode</label>
+          <label class="form-label" for="cue-mode">Mode{{ tip("Cycle: joins the playlist — on screen for the On time, then normal view for the Off time, then the next active cycle cue gets its turn. Hold: stays on screen continuously until released, overriding the playlist on its viewers (use for emergencies like weather).") }}</label>
           <select id="cue-mode" class="form-select">
             <option value="cycle">Cycle — take turns in the playlist</option>
             <option value="hold">Hold — take over until released</option>
           </select>
         </div>
-        <div class="row g-2 mb-3" id="cue-cycle-fields">
+        <div class="row g-2 mb-3 cue-cycle-only">
           <div class="col-6">
-            <label class="form-label">On (dwell) seconds</label>
+            <label class="form-label" for="cue-dwell">On seconds{{ tip("How long the source stays on screen each time this cue gets its turn.") }}</label>
             <input type="number" id="cue-dwell" class="form-control" min="1" value="10">
           </div>
           <div class="col-6">
-            <label class="form-label">Off (normal view) seconds</label>
+            <label class="form-label" for="cue-gap">Off seconds{{ tip("How long the normal view shows after this cue clears, before the next cue (or this one again) comes up. Example: On 10 / Off 30 = radar for 10 s every 40 s.") }}</label>
             <input type="number" id="cue-gap" class="form-control" min="0" value="30">
           </div>
         </div>
-        <div class="row g-2">
-          <div class="col-6">
-            <label class="form-label">Priority</label>
-            <input type="number" id="cue-priority" class="form-control" value="0">
-            <div class="form-text">Hold cues: higher wins.</div>
-          </div>
-          <div class="col-6">
-            <label class="form-label">Playlist order</label>
-            <input type="number" id="cue-order" class="form-control" value="0">
-            <div class="form-text">Cycle cues: lower plays first.</div>
-          </div>
+        <div class="mb-3 cue-cycle-only">
+          <label class="form-label" for="cue-order">Playlist order{{ tip("When several cycle cues are active they take turns in this order, lowest number first.") }}</label>
+          <input type="number" id="cue-order" class="form-control" value="0">
+        </div>
+        <div class="mb-3 cue-hold-only">
+          <label class="form-label" for="cue-priority">Priority{{ tip("If two hold cues are active on the same viewer, the higher number wins. Equal priority: the most recently activated wins.") }}</label>
+          <input type="number" id="cue-priority" class="form-control" value="0">
         </div>
       </div>
       <div class="modal-footer">
