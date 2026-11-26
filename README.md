@@ -4,7 +4,7 @@ Flask/Python application that centrally controls a network of **BirdDog NDI PLAY
 Replaces a QSYS Lua script as the single routing control point for up to 254 receivers on a shared subnet.
 SQLite for development, PostgreSQL-ready for production.
 
-Current version: **1.4.1**
+Current version: **1.5.0**
 
 ---
 
@@ -12,7 +12,7 @@ Current version: **1.4.1**
 
 | Feature | Summary |
 |---|---|
-| **Auto-scan** | Probes the full subnet concurrently, identifies BirdDog PLAY devices via `/about`, auto-creates receiver records |
+| **Auto-scan** | Probes the configured NDI ranges (a /24 or a wider VLAN like a /21) concurrently, identifies BirdDog PLAY devices via `/about`, auto-creates receiver records |
 | **Dashboard** | Grid of all receivers — live status, hostname, current source, inline source selector |
 | **Source registry** | NDI sources persist in the DB with a **stable index** that never changes, even when a source goes offline |
 | **Groups** | Tag receivers into named groups; send one source to all members at once |
@@ -195,7 +195,8 @@ the schema on first startup.
 | `FLASK_ENV` | `development` | `development` or `production` |
 | `SECRET_KEY` | insecure default | Flask session secret — **change in production** |
 | `DATABASE_URL` | SQLite in project dir | Full database URI |
-| `NDI_SUBNET_PREFIX` | `10.1.248.` | Fixed IP prefix for all receivers |
+| `NDI_SUBNET_PREFIX` | `10.1.248.` | Primary IP prefix. Receivers on this /24 are addressed by last octet (`83`); receivers elsewhere in the NDI range by more octets (`250.17`) |
+| `NDI_SCAN_RANGES` | _(empty)_ | What **Scan Network** probes — comma-separated CIDRs and/or ranges, e.g. `10.1.248.0/21` or `10.1.248.0/24, 10.1.250.1-10.1.250.99`. Empty = the prefix /24 only. Max 8192 hosts. Editable in Settings → BirdDog Network |
 | `NDI_DEVICE_PORT` | `8080` | BirdDog HTTP API port |
 | `NDI_DEVICE_PASSWORD` | `birddog` | BirdDog device password |
 | `HTTP_TIMEOUT` | `5` | Per-device request timeout (seconds) |
@@ -546,6 +547,8 @@ Leave `API_KEY` unset for unauthenticated access on a trusted LAN.
 |---|---|---|---|
 | POST | `/api/v1/route` | `{"ip_octet":"83","source":4}` | Route one receiver |
 | POST | `/api/v1/route/bulk` | `[{"ip_octet":"83","source":4},...]` | Route many concurrently |
+
+`ip_octet` (and `/api/v1/receivers/<octet>`) accepts a bare last octet for the primary /24, a partial address such as `250.17`, or a full IP — use one of the latter for receivers outside the `NDI_SUBNET_PREFIX` /24.
 
 `source` can be a **stable integer index** or a **source name string**.
 

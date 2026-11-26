@@ -17,7 +17,8 @@ Receiver endpoints
   POST   /api/receivers/<id>/settings/<group>   set a settings group
 
 Scan endpoint
-  POST   /api/scan                        subnet scan — discovers decoders AND cameras
+  GET    /api/scan/info                   what the configured scan ranges cover
+  POST   /api/scan                        range scan — discovers decoders AND cameras
 
 Source endpoints
   GET    /api/sources                     list cached sources
@@ -42,7 +43,7 @@ from app.services.audit_log import (
     source_changed,
     sources_discovered,
 )
-from app.routes._helpers import err as _err, valid_octet, MAX_LABEL
+from app.routes._helpers import err as _err, MAX_LABEL
 from app.services.birddog_client import (
     BirdDogClient,
     bulk_fetch_status,
@@ -51,6 +52,7 @@ from app.services.birddog_client import (
     run_async,
 )
 from app.services.scanner import scan_subnet
+from app.services.netrange import normalize_address, parse_scan_ranges, describe_scan_ranges
 from app.services.tractus_client import fetch_sources
 
 logger = logging.getLogger(__name__)
@@ -99,6 +101,10 @@ SETTINGS_GROUPS = {
 # ---------------------------------------------------------------------------
 
 
+_ADDR_ERR = ("ip_last_octet must be a last octet (1–254), a partial address "
+             "like 250.17, or a full IPv4 address")
+
+
 @api_bp.route("/receivers", methods=["GET"])
 def list_receivers():
     receivers = NDIReceiver.query.order_by(NDIReceiver.index).all()
@@ -108,14 +114,19 @@ def list_receivers():
 @api_bp.route("/receivers", methods=["POST"])
 def create_receiver():
     body = request.get_json(silent=True) or {}
-    ok, octet = valid_octet(body.get("ip_last_octet"))
+    ok, octet = normalize_address(body.get("ip_last_octet"), current_app.config["NDI_SUBNET_PREFIX"])
     if not ok:
-        return _err("ip_last_octet must be an integer from 1 to 254")
+        return _err(_ADDR_ERR)
     if NDIReceiver.query.filter_by(ip_last_octet=octet).first():
-        return _err(f"Receiver with IP octet {octet} already exists", 409)
+        return _err(f"Receiver at {octet} already exists", 409)
 
     # Use provided index, or last octet as integer, or next sequential
-    index = int(body["index"]) if "index" in body else int(octet)
+    if "index" in body:
+        index = int(body["index"])
+    else:
+        index = int(octet) if octet.isdigit() else None
+    if index is None:
+        index = (db.session.query(db.func.max(NDIReceiver.index)).scalar() or 0) + 1
     if NDIReceiver.query.filter_by(index=index).first():
         max_idx = db.session.query(db.func.max(NDIReceiver.index)).scalar() or 0
         index = max_idx + 1
@@ -145,9 +156,12 @@ def update_receiver(receiver_id: int):
         raw = body["label"]
         receiver.label = (str(raw).strip()[:MAX_LABEL] or None) if raw else None
     if "ip_last_octet" in body:
-        ok, octet = valid_octet(body["ip_last_octet"])
+        ok, octet = normalize_address(body["ip_last_octet"], current_app.config["NDI_SUBNET_PREFIX"])
         if not ok:
-            return _err("ip_last_octet must be an integer from 1 to 254")
+            return _err(_ADDR_ERR)
+        clash = NDIReceiver.query.filter_by(ip_last_octet=octet).first()
+        if clash and clash.id != receiver.id:
+            return _err(f"Receiver at {octet} already exists", 409)
         receiver.ip_last_octet = octet
 
     receiver.updated_at = datetime.utcnow()
@@ -240,6 +254,21 @@ def _upsert_camera(device: dict, now: datetime) -> tuple[str, object]:
         return "added", cam
 
 
+@api_bp.route("/scan/info", methods=["GET"])
+def scan_info():
+    """What a scan will cover — used by the scan modal's progress text."""
+    cfg = current_app.config
+    spec = cfg.get("NDI_SCAN_RANGES", "")
+    prefix = cfg["NDI_SUBNET_PREFIX"]
+    try:
+        hosts = len(parse_scan_ranges(spec, prefix))
+        error = None
+    except ValueError as exc:
+        hosts, error = 0, str(exc)
+    return jsonify({"ranges": spec, "hosts": hosts,
+                    "label": describe_scan_ranges(spec, prefix), "error": error})
+
+
 @api_bp.route("/scan", methods=["POST"])
 def scan():
     """
@@ -248,28 +277,39 @@ def scan():
     Both types are upserted; known devices not found are marked offline.
     """
     body = request.get_json(silent=True) or {}
-    try:
-        start = int(body.get("start", 1))
-        end = int(body.get("end", 254))
-    except (TypeError, ValueError):
-        return _err("start and end must be integers")
-
-    # Clamp to the legal IPv4 last-octet range and reject inverted bounds so
-    # a hostile or buggy client cannot ask us to fire 4-billion HTTP probes.
-    start = max(1, min(start, 254))
-    end = max(1, min(end, 254))
-    if start > end:
-        return _err("start must be ≤ end")
-
     cfg = current_app.config
+    prefix = cfg["NDI_SUBNET_PREFIX"]
+
+    if "start" in body or "end" in body:
+        # Legacy form: last-octet range on the primary /24.
+        try:
+            start = int(body.get("start", 1))
+            end = int(body.get("end", 254))
+        except (TypeError, ValueError):
+            return _err("start and end must be integers")
+        # Clamp to the legal IPv4 last-octet range and reject inverted bounds.
+        start = max(1, min(start, 254))
+        end = max(1, min(end, 254))
+        if start > end:
+            return _err("start must be ≤ end")
+        ips = [f"{prefix}{i}" for i in range(start, end + 1)]
+    else:
+        # Default: the configured NDI_SCAN_RANGES (or a body override).
+        spec = body.get("ranges", cfg.get("NDI_SCAN_RANGES", ""))
+        try:
+            ips = parse_scan_ranges(str(spec or ""), prefix)
+        except ValueError as exc:
+            return _err(str(exc))
+        if not ips:
+            return _err("Scan ranges contain no hosts")
+
     cameras_enabled = bool(cfg.get("CAMERAS_ENABLED", False))
     decoders, cameras = run_async(scan_subnet(
-        prefix=cfg["NDI_SUBNET_PREFIX"],
+        prefix=prefix,
         port=cfg["NDI_DEVICE_PORT"],
         password=cfg["NDI_DEVICE_PASSWORD"],
         timeout=2,
-        start=start,
-        end=end,
+        ips=ips,
     ))
     # Discard discovered cameras while the feature is paused so the table
     # neither gets new rows nor has its existing rows toggled offline.
@@ -314,7 +354,7 @@ def scan():
     for r in going_offline:
         receiver_went_offline(r.ip_address, r.hostname or "")
     scan_complete(
-        scanned=end - start + 1,
+        scanned=len(ips),
         found=len(decoders) + len(cameras),
         added=len(recv_added),
         updated=len(recv_updated),
@@ -323,7 +363,7 @@ def scan():
 
     all_receivers = NDIReceiver.query.order_by(NDIReceiver.index).all()
     return jsonify({
-        "scanned": end - start + 1,
+        "scanned": len(ips),
         "decoders_found": len(decoders),
         "cameras_found": len(cameras),
         "cameras_added": cam_added,

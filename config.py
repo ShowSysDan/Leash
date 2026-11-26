@@ -48,6 +48,7 @@ class Config:
     # --- Fallback values used before DB settings are loaded ---
     # These are seeded into the DB on first boot.  After that, the DB wins.
     NDI_SUBNET_PREFIX   = os.environ.get("NDI_SUBNET_PREFIX",   "10.1.248.")
+    NDI_SCAN_RANGES     = os.environ.get("NDI_SCAN_RANGES",     "")
     NDI_DEVICE_PORT     = int(os.environ.get("NDI_DEVICE_PORT",     "8080"))
     NDI_DEVICE_PASSWORD = os.environ.get("NDI_DEVICE_PASSWORD",     "birddog")
     HTTP_TIMEOUT        = int(os.environ.get("HTTP_TIMEOUT",         "5"))

@@ -49,6 +49,7 @@ from app import db
 from app.models import NDIReceiver, NDISource, ProjectCue
 from app.services.audit_log import device_error, source_change_failed, source_changed
 from app.services.birddog_client import client_from_ip, run_async
+from app.services.netrange import ip_from_suffix, normalize_address
 
 v1_bp = Blueprint("v1", __name__)
 logger = logging.getLogger(__name__)
@@ -137,7 +138,8 @@ def list_receivers():
 @v1_bp.route("/receivers/<octet>", methods=["GET"])
 @require_api_key
 def get_receiver(octet: str):
-    receiver = NDIReceiver.query.filter_by(ip_last_octet=str(octet)).first()
+    ok, suffix = normalize_address(octet, current_app.config["NDI_SUBNET_PREFIX"])
+    receiver = NDIReceiver.query.filter_by(ip_last_octet=suffix).first() if ok else None
     if not receiver:
         return jsonify({"error": f"No receiver with IP octet {octet}"}), 404
     return jsonify(_recv_summary(receiver))
@@ -186,9 +188,13 @@ def _resolve_source(value) -> tuple[str | None, str | None]:
     return str(value).strip(), None
 
 
+_OCTET_ERR = ("ip_octet must be a last octet 1–254 (primary /24), a partial "
+              "address like 250.17, or a full IPv4 address")
+
+
 def _do_route(ip_octet: str, source_name: str, cfg: dict) -> dict:
     """Synchronously route one receiver.  Returns result dict."""
-    ip = f"{cfg['NDI_SUBNET_PREFIX']}{ip_octet}"
+    ip = ip_from_suffix(ip_octet, cfg["NDI_SUBNET_PREFIX"])
     code, data = run_async(client_from_ip(ip, cfg).set_connect_to(source_name))
     ok = code == 200
     recv = NDIReceiver.query.filter_by(ip_last_octet=str(ip_octet)).first()
@@ -222,14 +228,19 @@ def route_one():
 
     Body (JSON):
       {
-        "ip_octet":  "83",          // last octet of receiver IP
+        "ip_octet":  "83",          // last octet of receiver IP on the primary
+                                    // /24; "250.17" or a full IP for receivers
+                                    // elsewhere in the NDI range
         "source":    4              // source_index (int) OR source name (str)
       }
     """
     body = request.get_json(silent=True) or {}
-    octet = str(body.get("ip_octet", "")).strip()
-    if not octet:
+    raw = str(body.get("ip_octet", "")).strip()
+    if not raw:
         return jsonify({"error": "ip_octet is required"}), 400
+    ok, octet = normalize_address(raw, current_app.config["NDI_SUBNET_PREFIX"])
+    if not ok:
+        return jsonify({"error": _OCTET_ERR}), 400
 
     source_name, err = _resolve_source(body.get("source"))
     if err:
@@ -276,9 +287,9 @@ def route_bulk():
         if not isinstance(item, dict):
             errors.append({"error": "entries must be objects", "item": item})
             continue
-        octet = str(item.get("ip_octet", "")).strip()
-        if not octet.isdigit() or not (1 <= int(octet) <= 254):
-            errors.append({"error": "ip_octet must be an integer 1–254", "item": item})
+        ok, octet = normalize_address(item.get("ip_octet"), cfg["NDI_SUBNET_PREFIX"])
+        if not ok:
+            errors.append({"error": _OCTET_ERR, "item": item})
             continue
         source_name, err = _resolve_source(item.get("source"))
         if err:
@@ -293,7 +304,7 @@ def route_bulk():
         sem = asyncio.Semaphore(concurrency)
 
         async def _one(octet, source_name):
-            ip = f"{prefix}{octet}"
+            ip = ip_from_suffix(octet, prefix)
             async with sem:
                 try:
                     code, _ = await client_from_ip(ip, cfg).set_connect_to(source_name)

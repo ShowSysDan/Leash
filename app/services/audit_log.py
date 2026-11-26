@@ -69,8 +69,9 @@ def _persist_event(ip: str, event_type: str, detail: str) -> None:
 
         recv_id = None
         if ip:
-            octet = ip.rsplit(".", 1)[-1]
-            r = NDIReceiver.query.filter_by(ip_last_octet=octet).first()
+            from app.services.netrange import suffix_from_ip
+            suffix = suffix_from_ip(ip, current_app.config.get("NDI_SUBNET_PREFIX", ""))
+            r = NDIReceiver.query.filter_by(ip_last_octet=suffix).first()
             if r:
                 recv_id = r.id
 

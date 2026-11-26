@@ -11,6 +11,8 @@ from typing import Any, Optional
 
 import aiohttp
 
+from app.services.netrange import ip_from_suffix
+
 logger = logging.getLogger(__name__)
 
 # BirdDog firmware v2 uses birddog-prefixed, lowercase paths for camera control.
@@ -533,7 +535,7 @@ async def bulk_fetch_source(receivers: list, config: dict) -> list[dict]:
     ) as session:
         async def _one(recv):
             async with sem:
-                ip = f"{prefix}{recv['ip_last_octet']}"
+                ip = ip_from_suffix(recv['ip_last_octet'], prefix)
                 try:
                     client = BirdDogClient(ip, port=port, password=password,
                                            timeout=timeout, session=session)
@@ -575,7 +577,7 @@ async def bulk_fetch_status(receivers: list, config: dict) -> list[dict]:
     ) as session:
         async def _one(recv):
             async with sem:
-                ip = f"{prefix}{recv['ip_last_octet']}"
+                ip = ip_from_suffix(recv['ip_last_octet'], prefix)
                 try:
                     client = BirdDogClient(ip, port=port, password=password,
                                            timeout=timeout, session=session)

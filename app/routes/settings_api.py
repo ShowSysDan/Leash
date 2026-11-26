@@ -69,6 +69,15 @@ def update_settings():
                 errors.append(f"{key}: must be an integer")
                 continue
 
+        if key == "NDI_SCAN_RANGES":
+            from app.services.netrange import parse_scan_ranges
+            try:
+                parse_scan_ranges(raw_str, body.get("NDI_SUBNET_PREFIX")
+                                  or app.config.get("NDI_SUBNET_PREFIX", ""))
+            except ValueError as exc:
+                errors.append(f"{key}: {exc}")
+                continue
+
         try:
             update_setting(app, key, raw_str)
             updated.append(key)

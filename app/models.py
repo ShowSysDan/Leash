@@ -17,7 +17,10 @@ class NDIReceiver(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     index = db.Column(db.Integer, unique=True, nullable=False)
     label = db.Column(db.String(100))
-    ip_last_octet = db.Column(db.String(3), unique=True, nullable=False)
+    # Address suffix relative to NDI_SUBNET_PREFIX: a bare last octet ("83")
+    # on the primary /24, or more octets ("250.17") elsewhere in a wider
+    # NDI VLAN.  See app.services.netrange.
+    ip_last_octet = db.Column(db.String(15), unique=True, nullable=False)
 
     # Live values from /about
     hostname = db.Column(db.String(255))
@@ -47,8 +50,9 @@ class NDIReceiver(db.Model):
 
     @property
     def ip_address(self) -> str:
+        from app.services.netrange import ip_from_suffix
         prefix = current_app.config.get("NDI_SUBNET_PREFIX", "10.1.248.")
-        return f"{prefix}{self.ip_last_octet}"
+        return ip_from_suffix(self.ip_last_octet, prefix)
 
     @property
     def display_name(self) -> str:
@@ -249,7 +253,10 @@ class PTZCamera(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     index = db.Column(db.Integer, unique=True, nullable=False)
     label = db.Column(db.String(100))
-    ip_last_octet = db.Column(db.String(3), unique=True, nullable=False)
+    # Address suffix relative to NDI_SUBNET_PREFIX: a bare last octet ("83")
+    # on the primary /24, or more octets ("250.17") elsewhere in a wider
+    # NDI VLAN.  See app.services.netrange.
+    ip_last_octet = db.Column(db.String(15), unique=True, nullable=False)
     model = db.Column(db.String(50))   # "P120", "A200GEN2", "P100", …
 
     hostname = db.Column(db.String(255))
@@ -275,8 +282,9 @@ class PTZCamera(db.Model):
 
     @property
     def ip_address(self) -> str:
+        from app.services.netrange import ip_from_suffix
         prefix = current_app.config.get("NDI_SUBNET_PREFIX", "10.1.248.")
-        return f"{prefix}{self.ip_last_octet}"
+        return ip_from_suffix(self.ip_last_octet, prefix)
 
     @property
     def display_name(self) -> str:

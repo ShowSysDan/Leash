@@ -6,6 +6,37 @@ Versioning follows [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.5.0] — 2026-11-26
+
+Discovery across a wider NDI VLAN (e.g. a /21 or /20) instead of a single /24.
+
+### Added
+- **Scan Ranges** setting (`NDI_SCAN_RANGES`, Settings → BirdDog Network):
+  comma-separated CIDRs and/or ranges such as `10.1.248.0/21` or
+  `10.1.248.0/24, 10.1.250.1-10.1.250.99`. Validated on save; capped at
+  8192 hosts. Empty keeps the old behaviour (prefix /24, 1–254).
+- `GET /api/scan/info` — what the configured ranges cover; the scan modal
+  now shows the range and an expected duration.
+- `POST /api/scan` accepts `{"ranges": "..."}` for a one-off scan; the
+  legacy `{"start", "end"}` last-octet form still works.
+
+### Changed
+- Receivers off the primary /24 are stored by address suffix relative to
+  `NDI_SUBNET_PREFIX` (`250.17` → 10.1.250.17), so two receivers with the
+  same last octet on different /24s no longer collide. Existing receivers
+  keep their bare octet. The `ip_last_octet` column widens to 15 chars via
+  the automatic migration.
+- Add-receiver form, `/api/receivers` and the external `/api/v1/` routing
+  endpoints accept a last octet, a partial address or a full IP.
+- Scans of more than 256 hosts use 256 parallel probes (a /21 completes in
+  roughly 16 s worst case).
+
+### Fixed
+- Scan results modal always showed 0 in the **Found** column.
+- `/api/v1/route` now validates `ip_octet` instead of passing it straight
+  into the device URL.
+- App version → `1.5.0`
+
 ## [1.4.1] — 2026-10-29
 
 Project tab usability pass.

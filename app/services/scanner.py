@@ -1,5 +1,5 @@
 """
-Subnet scanner — concurrently probes every host on the configured subnet
+Subnet scanner — concurrently probes every host in the configured scan ranges
 and identifies BirdDog devices via the /about endpoint.
 
 Returns two separate lists so the caller can upsert each type independently:
@@ -13,6 +13,7 @@ from typing import Optional
 import aiohttp
 
 from app.services.birddog_client import BirdDogClient
+from app.services.netrange import suffix_from_ip
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +39,9 @@ def _extract_model(hw: str, fw: str) -> str:
     return "Unknown"
 
 
-def _parse_decoder(octet: int, ip: str, data: dict) -> dict:
+def _parse_decoder(suffix: str, ip: str, data: dict) -> dict:
     return {
-        "ip_last_octet": str(octet),
+        "ip_last_octet": suffix,
         "ip_address": ip,
         "hostname": (data.get("HostName") or "").strip(),
         "firmware_version": data.get("FirmwareVersion", ""),
@@ -55,11 +56,11 @@ def _parse_decoder(octet: int, ip: str, data: dict) -> dict:
     }
 
 
-def _parse_camera(octet: int, ip: str, data: dict) -> dict:
+def _parse_camera(suffix: str, ip: str, data: dict) -> dict:
     hw = data.get("HardwareVersion", "")
     fw = data.get("FirmwareVersion", "")
     return {
-        "ip_last_octet": str(octet),
+        "ip_last_octet": suffix,
         "ip_address": ip,
         "hostname": (data.get("HostName") or "").strip(),
         "model": _extract_model(hw, fw),
@@ -80,21 +81,32 @@ async def scan_subnet(
     timeout: int = 2,
     start: int = 1,
     end: int = 254,
+    ips: Optional[list[str]] = None,
 ) -> tuple[list[dict], list[dict]]:
     """
-    Probe every host from prefix+start to prefix+end (inclusive).
-    Returns (decoders, cameras) — two lists of dicts.
+    Probe every host in *ips* (full dotted addresses), or — when *ips* is
+    None — prefix+start … prefix+end on the primary /24.
+    Returns (decoders, cameras) — two lists of dicts.  Each dict's
+    ``ip_last_octet`` is the address suffix relative to *prefix* (see
+    app.services.netrange), so receivers off the primary /24 get e.g.
+    "250.17" instead of colliding on the bare last octet.
     All probes share one aiohttp session and a concurrency semaphore.
     """
-    sem = asyncio.Semaphore(64)
-    connector = aiohttp.TCPConnector(limit=64, enable_cleanup_closed=True)
+    if ips is None:
+        ips = [f"{prefix}{i}" for i in range(start, end + 1)]
+    # Most addresses in a big range are empty and just sit until the connect
+    # timeout, so wider scans get more parallelism to keep wall time sane
+    # (/24 ≈ 2 s, /21 ≈ 2032 hosts ≈ 16 s worst case).
+    concurrency = 64 if len(ips) <= 256 else 256
+    sem = asyncio.Semaphore(concurrency)
+    connector = aiohttp.TCPConnector(limit=concurrency, enable_cleanup_closed=True)
 
     async with aiohttp.ClientSession(
         connector=connector,
         timeout=aiohttp.ClientTimeout(total=timeout, connect=min(timeout, 2)),
     ) as session:
-        async def _probe(octet: int) -> Optional[dict]:
-            ip = f"{prefix}{octet}"
+        async def _probe(ip: str) -> Optional[dict]:
+            suffix = suffix_from_ip(ip, prefix)
             async with sem:
                 client = BirdDogClient(ip, port=port, password=password,
                                        timeout=timeout, session=session)
@@ -110,14 +122,14 @@ async def scan_subnet(
             dtype = _device_type(data)
             if dtype == "decoder":
                 logger.info("Found decoder at %s (%s)", ip, data.get("HostName", "?"))
-                return {"_type": "decoder", **_parse_decoder(octet, ip, data)}
+                return {"_type": "decoder", **_parse_decoder(suffix, ip, data)}
             if dtype == "camera":
                 logger.info("Found camera at %s (%s)", ip, data.get("HostName", "?"))
-                return {"_type": "camera", **_parse_camera(octet, ip, data)}
+                return {"_type": "camera", **_parse_camera(suffix, ip, data)}
             return None
 
         results = await asyncio.gather(
-            *[_probe(i) for i in range(start, end + 1)],
+            *[_probe(ip) for ip in ips],
             return_exceptions=False,
         )
         found = [r for r in results if r is not None]
