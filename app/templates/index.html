@@ -28,7 +28,7 @@
   <div class="input-group">
     <span class="input-group-text"><i class="bi bi-search"></i></span>
     <input id="receiver-search" type="search" class="form-control"
-           placeholder="Filter by hostname or IP last octet…"
+           placeholder="Filter by hostname or IP…"
            autocomplete="off" inputmode="search" aria-label="Filter receivers">
     <button type="button" class="btn btn-outline-secondary" id="receiver-search-clear"
             style="display:none" aria-label="Clear search">
@@ -55,7 +55,7 @@
   {% for r in receivers %}
   <div class="col receiver-col {% if r.status == 'offline' %}col-offline{% endif %}"
        id="col-{{ r.id }}"
-       data-search="{{ ((r.hostname or '') ~ ' ' ~ (r.label or '') ~ ' ' ~ (r.ip_address or '') ~ ' ' ~ ('.' ~ r.ip_last_octet|string if r.ip_last_octet is not none else ''))|lower }}">
+       data-search="{{ ((r.hostname or '') ~ ' ' ~ (r.label or '') ~ ' ' ~ (r.ip_address or '') ~ ' ' ~ ('.' ~ r.ip_last_octet|string if r.ip_last_octet is not none else '') ~ ' ' ~ r.ip_short)|lower }}">
     <div class="card h-100 receiver-card border-{{ 'success' if r.status == 'online' else 'danger' if r.status == 'offline' else 'secondary' }}"
          data-receiver-id="{{ r.id }}">
       <div class="card-header d-flex align-items-center gap-2 py-2">
@@ -65,7 +65,7 @@
               title="{{ r.ip_address }} · firmware {{ r.firmware_version or '—' }}"
               data-firmware="{{ r.firmware_version or '—' }}"
               data-ip="{{ r.ip_address }}">
-          {{ r.hostname or r.label or ('Player ' ~ r.ip_last_octet) }}
+          {{ r.hostname or r.label or ('Player ' ~ r.ip_short) }}
         </span>
         <small class="text-muted ms-auto text-nowrap ip-display">{{ r.ip_address }}</small>
         <a href="{{ url_for('main.receiver_detail', receiver_id=r.id) }}"
@@ -141,7 +141,7 @@
           Manual entry is for cases where a device isn't responding to the scan.
         </p>
         <div class="mb-3">
-          <label class="form-label">IP Last Octet <small class="text-muted">(e.g. 83 → 10.1.248.83)</small></label>
+          <label class="form-label">IP Address <small class="text-muted">(last octet, e.g. 83 → {{ config.NDI_SUBNET_PREFIX }}83, or a full IP)</small></label>
           <input type="text" id="add-octet" class="form-control" placeholder="83">
         </div>
         <div class="mb-3">

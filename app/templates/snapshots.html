@@ -161,7 +161,7 @@
                      value="{{ r.id }}" checked>
               <span class="status-dot status-{{ r.status }}"></span>
               <div class="overflow-hidden">
-                <div class="text-truncate small">{{ r.hostname or r.ip_last_octet }}</div>
+                <div class="text-truncate small">{{ r.hostname or r.ip_short }}</div>
                 <div class="text-muted" style="font-size:0.7rem">{{ r.current_source or 'no source' }}</div>
               </div>
             </label>

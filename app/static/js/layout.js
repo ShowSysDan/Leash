@@ -120,10 +120,10 @@ document.addEventListener('DOMContentLoaded', () => {
     header.className = 'lc-card-header';
     const hostSpan = document.createElement('span');
     hostSpan.className = 'lc-hostname';
-    hostSpan.textContent = r?.hostname || r?.label || `.${r?.ip_last_octet}`;
+    hostSpan.textContent = r?.hostname || r?.label || (r?.ip_short ?? `.${r?.ip_last_octet}`);
     const ixSpan = document.createElement('span');
     ixSpan.className = 'lc-index';
-    ixSpan.textContent = r?.ip_last_octet ?? '';
+    ixSpan.textContent = r?.ip_short ?? r?.ip_last_octet ?? '';
     header.appendChild(hostSpan);
     header.appendChild(ixSpan);
 
@@ -413,7 +413,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const r   = map[rid];
       if (!r) return;
       const hn = card.querySelector('.lc-hostname');
-      if (hn) hn.textContent = r.hostname || r.label || `.${r.ip_last_octet}`;
+      if (hn) hn.textContent = r.hostname || r.label || (r.ip_short ?? `.${r.ip_last_octet}`);
       const sel = card.querySelector('.lc-source-select');
       if (sel && r.current_source && sel.value !== r.current_source) {
         if (!Array.from(sel.options).some(o => o.value === r.current_source)) {

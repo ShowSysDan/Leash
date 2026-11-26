@@ -76,7 +76,7 @@
                   data-receiver-id="{{ r.id }}"
                   data-group-id="{{ group.id }}">
               <span class="status-dot status-{{ r.status }} me-1" style="width:6px;height:6px;"></span>
-              {{ r.hostname or r.ip_last_octet }}
+              {{ r.hostname or r.ip_short }}
               <button type="button" class="btn-close btn-close-white ms-1 btn-remove-member"
                       style="font-size:0.5rem;"
                       data-receiver-id="{{ r.id }}"
@@ -236,8 +236,8 @@
               <input type="checkbox" class="form-check-input mm-recv-check"
                      data-receiver-id="{{ r.id }}" value="{{ r.id }}">
               <span class="status-dot status-{{ r.status }}"></span>
-              <span class="text-truncate small">{{ r.hostname or r.ip_last_octet }}</span>
-              <small class="text-muted ms-auto">.{{ r.ip_last_octet }}</small>
+              <span class="text-truncate small">{{ r.hostname or r.ip_short }}</span>
+              <small class="text-muted ms-auto">{{ r.ip_short }}</small>
             </label>
           </div>
           {% endfor %}

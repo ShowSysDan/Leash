@@ -22,9 +22,9 @@
       <div class="card-header d-flex align-items-center justify-content-between py-2">
         <div class="d-flex align-items-center gap-2">
           <span class="status-dot status-{{ cam.status }}"></span>
-          <span class="fw-semibold hostname-display">{{ cam.hostname or cam.label or '.' ~ cam.ip_last_octet }}</span>
+          <span class="fw-semibold hostname-display">{{ cam.hostname or cam.label or cam.ip_short }}</span>
         </div>
-        <small class="text-muted">.{{ cam.ip_last_octet }}</small>
+        <small class="text-muted">{{ cam.ip_short }}</small>
       </div>
       <div class="card-body py-2">
         {% if cam.label %}
@@ -47,7 +47,7 @@
         </a>
         <button class="btn btn-sm btn-outline-danger btn-remove-camera"
                 data-camera-id="{{ cam.id }}"
-                data-camera-name="{{ (cam.label or cam.hostname or '.' ~ cam.ip_last_octet) | e }}"
+                data-camera-name="{{ (cam.label or cam.hostname or cam.ip_short) | e }}"
                 title="Remove camera">
           <i class="bi bi-trash"></i>
         </button>

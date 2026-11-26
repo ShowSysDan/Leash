@@ -66,7 +66,7 @@ window.Leash = (() => {
 
     // Hostname / label
     const hn = card.querySelector('.hostname-display');
-    if (hn) hn.textContent = data.hostname || data.label || `Player ${data.ip_last_octet}`;
+    if (hn) hn.textContent = data.hostname || data.label || `Player ${data.ip_short ?? data.ip_last_octet}`;
 
     // IP display
     const ipEl = card.querySelector('.ip-display');
@@ -202,10 +202,18 @@ window.Leash = (() => {
     const body  = document.getElementById('scan-result-body');
     const reloadBtn = document.getElementById('btn-scan-reload-page');
 
-    // Static loader markup — no interpolation, safe.
-    body.innerHTML = '<div class="loader-overlay"><span class="spinner-border me-2"></span>Scanning 10.1.248.1–254… (this takes ~5 s)</div>';
+    // Static loader markup — the range label is filled via textContent.
+    body.innerHTML = '<div class="loader-overlay"><span class="spinner-border me-2"></span><span id="scan-progress-text">Scanning…</span></div>';
     if (reloadBtn) reloadBtn.style.display = 'none';
     modal.show();
+
+    fetch('/api/scan/info').then(r => r.ok ? r.json() : null).then(info => {
+      const el = document.getElementById('scan-progress-text');
+      if (!el || !info || !info.hosts) return;
+      // ~2 s per batch of 64 (≤256 hosts) or 256 (larger ranges) unreachable hosts.
+      const secs = Math.max(2, Math.ceil(info.hosts / (info.hosts <= 256 ? 64 : 256)) * 2);
+      el.textContent = `Scanning ${info.label}… (up to ~${secs} s)`;
+    }).catch(() => {});
 
     try {
       const resp = await fetch('/api/scan', {
@@ -226,7 +234,7 @@ window.Leash = (() => {
 
       const added   = data.added ?? 0;
       const updated = data.updated ?? 0;
-      const found   = data.found ?? 0;
+      const found   = data.found ?? ((data.decoders_found ?? 0) + (data.cameras_found ?? 0));
       const total   = data.scanned ?? 254;
 
       body.textContent = '';
@@ -383,7 +391,7 @@ window.Leash = (() => {
   async function addReceiver() {
     const octet = document.getElementById('add-octet')?.value?.trim();
     const label = document.getElementById('add-label')?.value?.trim();
-    if (!octet) { toast('IP octet is required', 'warning'); return; }
+    if (!octet) { toast('IP address or octet is required', 'warning'); return; }
 
     const resp = await fetch('/api/receivers', {
       method: 'POST',
@@ -392,7 +400,7 @@ window.Leash = (() => {
     });
     const data = await resp.json();
     if (resp.ok) {
-      toast(`Receiver .${octet} added`, 'success');
+      toast(`Receiver ${data.ip_address || octet} added`, 'success');
       setTimeout(() => location.reload(), 800);
     } else {
       toast(data.error || 'Failed to add receiver', 'danger');

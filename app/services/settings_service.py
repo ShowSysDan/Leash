@@ -29,7 +29,13 @@ SETTINGS_SCHEMA: list[dict] = [
     # BirdDog Network
     dict(key="NDI_SUBNET_PREFIX",      type="string", default="10.1.248.",
          group="BirdDog Network", label="Subnet Prefix",
-         description="IP prefix for the BirdDog device subnet (e.g. 10.1.248.)"),
+         description="IP prefix for the BirdDog device subnet (e.g. 10.1.248.). "
+                     "Receivers on this /24 are addressed by last octet; others by more octets (e.g. 250.17)."),
+    dict(key="NDI_SCAN_RANGES",        type="string", default="",
+         group="BirdDog Network", label="Scan Ranges",
+         description="What Scan Network probes: comma-separated CIDRs and/or ranges, e.g. "
+                     "10.1.248.0/21  or  10.1.248.0/24, 10.1.250.1-10.1.250.99. "
+                     "Leave empty to scan only the Subnet Prefix /24 (1–254)."),
     dict(key="NDI_DEVICE_PORT",        type="int",    default="8080",
          group="BirdDog Network", label="Device Port",
          description="HTTP port on BirdDog PLAY devices"),
