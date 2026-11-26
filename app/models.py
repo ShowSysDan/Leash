@@ -55,16 +55,22 @@ class NDIReceiver(db.Model):
         return ip_from_suffix(self.ip_last_octet, prefix)
 
     @property
+    def ip_short(self) -> str:
+        """Last two octets for display, e.g. "248.83" (storage is unchanged)."""
+        return ".".join(self.ip_address.split(".")[-2:])
+
+    @property
     def display_name(self) -> str:
-        """Best human-friendly identifier: label > hostname > IP octet."""
-        return self.label or self.hostname or self.ip_last_octet
+        """Best human-friendly identifier: label > hostname > last two IP octets."""
+        return self.label or self.hostname or self.ip_short
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "index": self.index,
-            "label": self.label or self.hostname or f"Player {self.ip_last_octet}",
+            "label": self.label or self.hostname or f"Player {self.ip_short}",
             "ip_last_octet": self.ip_last_octet,
+            "ip_short": self.ip_short,
             "ip_address": self.ip_address,
             "hostname": self.hostname,
             "current_source": self.current_source,
@@ -240,7 +246,7 @@ class SnapshotEntry(db.Model):
             "source_name": self.source_name,
             "receiver_hostname": r.hostname if r else None,
             "receiver_ip": r.ip_address if r else None,
-            "receiver_label": (r.label or r.hostname or f"Player {r.ip_last_octet}") if r else None,
+            "receiver_label": (r.label or r.hostname or f"Player {r.ip_short}") if r else None,
             "receiver_status": r.status if r else None,
         }
 
@@ -287,15 +293,21 @@ class PTZCamera(db.Model):
         return ip_from_suffix(self.ip_last_octet, prefix)
 
     @property
+    def ip_short(self) -> str:
+        """Last two octets for display, e.g. "248.83" (storage is unchanged)."""
+        return ".".join(self.ip_address.split(".")[-2:])
+
+    @property
     def display_name(self) -> str:
-        return self.label or self.hostname or self.ip_last_octet
+        return self.label or self.hostname or self.ip_short
 
     def to_dict(self) -> dict:
         return {
             "id": self.id,
             "index": self.index,
-            "label": self.label or self.hostname or f"Camera {self.ip_last_octet}",
+            "label": self.label or self.hostname or f"Camera {self.ip_short}",
             "ip_last_octet": self.ip_last_octet,
+            "ip_short": self.ip_short,
             "ip_address": self.ip_address,
             "hostname": self.hostname,
             "model": self.model,

@@ -55,7 +55,7 @@
   {% for r in receivers %}
   <div class="col receiver-col {% if r.status == 'offline' %}col-offline{% endif %}"
        id="col-{{ r.id }}"
-       data-search="{{ ((r.hostname or '') ~ ' ' ~ (r.label or '') ~ ' ' ~ (r.ip_address or '') ~ ' ' ~ ('.' ~ r.ip_last_octet|string if r.ip_last_octet is not none else ''))|lower }}">
+       data-search="{{ ((r.hostname or '') ~ ' ' ~ (r.label or '') ~ ' ' ~ (r.ip_address or '') ~ ' ' ~ ('.' ~ r.ip_last_octet|string if r.ip_last_octet is not none else '') ~ ' ' ~ r.ip_short)|lower }}">
     <div class="card h-100 receiver-card border-{{ 'success' if r.status == 'online' else 'danger' if r.status == 'offline' else 'secondary' }}"
          data-receiver-id="{{ r.id }}">
       <div class="card-header d-flex align-items-center gap-2 py-2">
@@ -65,7 +65,7 @@
               title="{{ r.ip_address }} · firmware {{ r.firmware_version or '—' }}"
               data-firmware="{{ r.firmware_version or '—' }}"
               data-ip="{{ r.ip_address }}">
-          {{ r.hostname or r.label or ('Player ' ~ r.ip_last_octet) }}
+          {{ r.hostname or r.label or ('Player ' ~ r.ip_short) }}
         </span>
         <small class="text-muted ms-auto text-nowrap ip-display">{{ r.ip_address }}</small>
         <a href="{{ url_for('main.receiver_detail', receiver_id=r.id) }}"

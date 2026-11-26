@@ -28,6 +28,11 @@ Discovery across a wider NDI VLAN (e.g. a /21 or /20) instead of a single /24.
   the automatic migration.
 - Add-receiver form, `/api/receivers` and the external `/api/v1/` routing
   endpoints accept a last octet, a partial address or a full IP.
+- Receivers and cameras are now *displayed* by their last two octets
+  (`248.83`, `250.17`) wherever a short IP label was shown — dashboard and
+  operator fallbacks, group/layout/snapshot lists, layout cards. Storage,
+  routing and the external API's `ip_octet` input are unchanged; API
+  responses gain an `ip_short` field.
 - Scans of more than 256 hosts use 256 parallel probes (a /21 completes in
   roughly 16 s worst case).
 

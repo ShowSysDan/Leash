@@ -63,8 +63,8 @@
               <input type="checkbox" class="form-check-input atl-check"
                      value="{{ r.id }}" {% if already %}disabled{% endif %}>
               <span class="status-dot status-{{ r.status }}"></span>
-              <span class="text-truncate small">{{ r.hostname or r.ip_last_octet }}</span>
-              <small class="text-muted ms-auto">.{{ r.ip_last_octet }}</small>
+              <span class="text-truncate small">{{ r.hostname or r.ip_short }}</span>
+              <small class="text-muted ms-auto">{{ r.ip_short }}</small>
             </label>
           </div>
           {% endfor %}

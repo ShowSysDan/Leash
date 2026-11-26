@@ -41,10 +41,10 @@
       <div class="operator-receiver-row {% if r.status == 'offline' %}is-offline op-rcv-offline{% endif %}"
            data-rid="{{ r.id }}"
            data-status="{{ r.status }}"
-           data-search="{{ ((r.hostname or '') ~ ' ' ~ (r.label or '') ~ ' ' ~ (r.ip_address or '') ~ ' ' ~ ('.' ~ r.ip_last_octet|string if r.ip_last_octet is not none else ''))|lower }}">
+           data-search="{{ ((r.hostname or '') ~ ' ' ~ (r.label or '') ~ ' ' ~ (r.ip_address or '') ~ ' ' ~ ('.' ~ r.ip_last_octet|string if r.ip_last_octet is not none else '') ~ ' ' ~ r.ip_short)|lower }}">
         <div class="op-rcv-head">
           <span class="status-dot status-{{ r.status }}"></span>
-          <span class="op-rcv-name">{{ r.hostname or r.label or ('Player ' ~ r.ip_last_octet) }}</span>
+          <span class="op-rcv-name">{{ r.hostname or r.label or ('Player ' ~ r.ip_short) }}</span>
           <span class="op-rcv-ip">{{ r.ip_address }}</span>
         </div>
         <select class="form-select op-rcv-source"
@@ -148,11 +148,11 @@
        style="color:inherit">
       <div class="op-action-head">
         <span class="status-dot status-{{ cam.status }}"></span>
-        <span class="op-action-title">{{ cam.hostname or cam.label or ('.' ~ cam.ip_last_octet) }}</span>
+        <span class="op-action-title">{{ cam.hostname or cam.label or cam.ip_short }}</span>
         <i class="bi bi-joystick ms-auto text-warning"></i>
       </div>
       <div class="op-action-meta">
-        .{{ cam.ip_last_octet }}
+        {{ cam.ip_short }}
         {% if cam.model %} · {{ cam.model }}{% endif %}
         {% if cam.presets %} · {{ cam.presets|length }} preset{{ '' if cam.presets|length == 1 else 's' }}{% endif %}
       </div>

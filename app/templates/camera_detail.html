@@ -7,7 +7,7 @@
     <a href="{{ url_for('main.cameras') }}" class="btn btn-sm btn-outline-secondary me-2">
       <i class="bi bi-arrow-left me-1"></i>Cameras
     </a>
-    <span class="fw-semibold fs-5">{{ camera.hostname or camera.label or '.' ~ camera.ip_last_octet }}</span>
+    <span class="fw-semibold fs-5">{{ camera.hostname or camera.label or camera.ip_short }}</span>
     {% if camera.model %}<span class="badge bg-secondary ms-2">{{ camera.model }}</span>{% endif %}
     <span class="badge ms-1 bg-{{ 'success' if camera.status == 'online' else 'danger' if camera.status == 'offline' else 'secondary' }}">
       {{ camera.status }}

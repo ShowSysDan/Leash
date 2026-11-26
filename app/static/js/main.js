@@ -66,7 +66,7 @@ window.Leash = (() => {
 
     // Hostname / label
     const hn = card.querySelector('.hostname-display');
-    if (hn) hn.textContent = data.hostname || data.label || `Player ${data.ip_last_octet}`;
+    if (hn) hn.textContent = data.hostname || data.label || `Player ${data.ip_short ?? data.ip_last_octet}`;
 
     // IP display
     const ipEl = card.querySelector('.ip-display');
